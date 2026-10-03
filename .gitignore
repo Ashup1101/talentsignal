@@ -1,0 +1,44 @@
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Terraform
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
+
+# dbt
+src/dbt_project/target/
+src/dbt_project/dbt_packages/
+src/dbt_project/logs/
+src/dbt_project/profiles.yml
+
+# Airflow (local Docker Compose)
+infra/logs/
+infra/plugins/
+
+# MLflow (local runs; tracking is Databricks-hosted)
+mlruns/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

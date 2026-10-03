@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "talentsignal"
+version = "0.1.0"
+description = "Job market intelligence and predictive analytics platform."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+# Phase 1 (ingestion) only. Later phases add their deps when they start.
+dependencies = [
+    "boto3>=1.34",
+    "openpyxl>=3.1",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip-tools>=7.4",
+    "pytest>=8.0",
+    "responses>=0.25",
+]
+
+[tool.setuptools]
+# Not an installable package; code runs from the repo root (python -m src....).
+packages = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
