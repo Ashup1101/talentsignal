@@ -1,0 +1,36 @@
+name: CI
+
+# Planned: dbt tests on pull requests (Phase 3) and a Streamlit redeploy on
+# push to main (Phase 6). For now every push / PR to main runs the test suite.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      # PySpark (tests/test_processing.py) runs on the JVM.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Tests stub S3 and HTTP calls, so no secrets are needed here.
+      - name: Run tests
+        run: pytest -q
