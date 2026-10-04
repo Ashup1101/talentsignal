@@ -11,8 +11,8 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 
 | Phase | Scope                          | Status      |
 |-------|--------------------------------|-------------|
-| 1     | Ingestion (JSearch, BLS → S3)  | In progress |
-| 2     | PySpark processing             | Not started |
+| 1     | Ingestion (JSearch, BLS → S3)  | Done        |
+| 2     | PySpark processing             | Done (local; Databricks pending) |
 | 3     | dbt modeling                   | Not started |
 | 4     | Airflow orchestration          | Not started |
 | 5     | NLP + ML models                | Not started |
@@ -20,7 +20,8 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 
 ## Local setup
 
-Requires Python 3.11.
+Requires Python 3.11 and Java 17 (for local Spark; `brew install openjdk@17`,
+then set `JAVA_HOME`).
 
 ```bash
 python3.11 -m venv .venv
@@ -40,6 +41,18 @@ python -m src.ingestion.fetch_jobs   # s3://$S3_RAW_BUCKET/jobs/raw/{role}/{loca
 Both are idempotent per day: an existing object is never overwritten, and
 `fetch_jobs` skips role/location pairs already landed today without calling
 the API, so reruns don't spend JSearch quota.
+
+## Phase 2: clean and enrich with PySpark
+
+```bash
+python -m src.processing.clean_jobs      # → s3://$S3_PROCESSED_BUCKET/delta/jobs_clean
+python -m src.processing.extract_skills  # → delta/job_skills (needs jobs_clean)
+python -m src.processing.clean_bls       # → delta/bls_occupations
+```
+
+Each job rebuilds its Delta table from scratch, so reruns are safe. While one
+runs locally, the Spark UI is at http://localhost:4040. The first run
+downloads the Delta and S3 connector jars (a few hundred MB, cached in ~/.ivy2).
 
 Dependencies are declared in `pyproject.toml` and pinned with pip-tools:
 

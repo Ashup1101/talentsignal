@@ -63,8 +63,11 @@ talentsignal/
 │   │   ├── fetch_bls.py          # BLS Occupational Outlook → S3 raw zone
 │   │   └── s3_utils.py           # boto3 helpers (upload, check exists, list)
 │   │
-│   ├── processing/               # PySpark notebooks + scripts
+│   ├── processing/               # PySpark jobs (run locally or on Databricks)
+│   │   ├── __init__.py
+│   │   ├── spark_utils.py        # SparkSession (local Delta + S3A / Databricks), bucket URIs
 │   │   ├── clean_jobs.py         # flatten JSON, deduplicate, normalize
+│   │   ├── clean_bls.py          # BLS raw snapshots → occupations table
 │   │   └── extract_skills.py     # PySpark UDF for skill extraction
 │   │
 │   ├── dbt_project/              # full dbt project lives here
@@ -100,6 +103,7 @@ talentsignal/
 │
 ├── tests/
 │   ├── test_ingestion.py
+│   ├── test_processing.py        # local SparkSession, no S3/Delta
 │   └── test_ml.py
 │
 └── .github/
@@ -141,9 +145,33 @@ Deliverable: running `python -m src.ingestion.fetch_jobs` populates S3 with
 real data. Must work end-to-end before Phase 2 starts.
 
 ### Phase 2 — PySpark processing (Databricks)
-Build after Phase 1 is confirmed working.
-Files: src/processing/clean_jobs.py, src/processing/extract_skills.py
-Details: TBD — ask for spec when Phase 1 is done.
+Built local-first: the same code runs on a laptop (PySpark 4.1 + Delta 4.3 +
+hadoop-aws, Java 17) and on Databricks Runtime 18 LTS (Spark 4.1). Which
+Databricks option to use (AWS workspace vs Free Edition, which likely can't
+read our S3) is still open — decide before Phase 4.
+
+Output: Delta tables in s3://{S3_PROCESSED_BUCKET}/delta/, each fully
+rebuilt from the raw zone on every run (overwrite, idempotent; switch to
+incremental MERGE only if raw volume makes full rebuilds slow).
+
+- src/processing/clean_jobs.py → delta/jobs_clean (one row per unique posting)
+  - Explicit raw schema (no inference); flatten envelopes → one row per posting
+  - Normalize: title/employer text, state name → 2-letter code; salaries
+    annualized (HOUR×2080, DAY×260, WEEK×52, MONTH×12); outside $20K–$1M,
+    unknown period or min > max → nulled with salary_flag
+  - Never fill missing city/state from the search location (that's a guess)
+  - Dedup pass 1: same job_id → latest fetch. Pass 2: same normalized
+    title + employer + city → keep salary present > longer description >
+    latest fetch > job_id
+- src/processing/extract_skills.py → delta/job_skills (job_id, skill, category)
+  - Curated dictionary (~110 skills, 8 categories) with aliases; ambiguous
+    names (R, Go, Excel, Snowflake, ...) get case-sensitive/custom patterns
+  - pandas UDF built in a factory so workers receive it by value
+  - Searches title + description (/search-v2 returns no job_highlights)
+- src/processing/clean_bls.py → delta/bls_occupations (latest snapshot per code)
+
+Deliverable (met 2026-10-03, local): 702 raw → 688 clean postings; 5,202
+skill mentions, 655 of 688 postings with ≥1 skill; 830 BLS occupations.
 
 ### Phase 3 — dbt modeling
 Build after Phase 2 is confirmed working.
