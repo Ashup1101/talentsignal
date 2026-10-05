@@ -6,12 +6,19 @@ from public APIs, processed at scale with PySpark on Databricks, modeled with
 dbt, orchestrated by Airflow, enriched with NLP + ML, and served through a
 hosted Streamlit app on AWS EC2.
 
+The end product is a resume intelligence tool: a user uploads a resume PDF and
+sees how it compares with what real postings ask for — skill demand, match per
+target role, predicted salary, the most valuable missing skills, and matching
+postings from this week. (Direction set 2026-10-04; see Phase 6.)
+
 Goal: a publicly accessible, interview-demonstrable portfolio project covering
 the full data engineering + ML stack.
 
 ## Rebuild targets (from the original project's resume description)
 This repo rebuilds an earlier version of TalentSignal whose code was lost; only
-the resume description survives. Each phase must deliver what it claims:
+the resume description survives. Each phase must deliver what it claims. The
+App bullet was deliberately changed on 2026-10-04 (resume intelligence tool
+instead of a market dashboard); update the resume to match what is built.
 - Scale: structured analytics across 50K+ job postings (after dedup).
 - Databricks PySpark: large-scale deduplication + skill extraction via UDFs.
 - dbt: star-schema mart layer over RDS PostgreSQL — dim_role, dim_location,
@@ -22,8 +29,12 @@ the resume description survives. Each phase must deliver what it claims:
   Prophet skill-demand forecaster with a 90-day horizon.
 - Airflow: daily DAG using DatabricksRunNowOperator to chain ingestion →
   PySpark → dbt run → ML retraining.
-- App: four-page Streamlit app on EC2 behind nginx, CI/CD via GitHub Actions,
-  showing live salary predictions, skill demand forecasts, market trends.
+- App: four-page Streamlit resume intelligence tool on EC2 behind nginx,
+  CI/CD via GitHub Actions. Upload a resume PDF → skills found (regex +
+  keyword matching with the pipeline's skill dictionary, no LLM) with their
+  demand in real postings, match % per target role, XGBoost salary
+  prediction, top 3 missing skills with estimated salary impact, and this
+  week's matching postings.
 
 Numbers above are targets, not facts. Measure them on real data and report
 the actual result (e.g. real held-out MAE), even if it misses the target.
@@ -38,7 +49,7 @@ the actual result (e.g. real held-out MAE), even if it misses the target.
 - Orchestration:    Apache Airflow 2.x (Docker Compose locally)
 - NLP:              spaCy, sentence-transformers, BERTopic, VADER
 - ML:               XGBoost, Prophet, scikit-learn, MLflow (Databricks-hosted)
-- App:              Streamlit
+- App:              Streamlit, pdfplumber (resume PDF → text)
 - Hosting:          AWS EC2 t3.small, nginx, systemd, GitHub Actions CI/CD
 - Python deps:      managed via pyproject.toml + pip-tools
 
@@ -95,10 +106,10 @@ talentsignal/
 │   │
 │   └── app/
 │       ├── streamlit_app.py      # entry point
-│       └── pages/
-│           ├── 01_market_overview.py
+│       └── pages/                # Streamlit orders the sidebar by filename
+│           ├── 01_resume_analyzer.py  # upload resume PDF → skills, match %, salary, gaps
 │           ├── 02_salary_explorer.py
-│           ├── 03_skill_demand.py
+│           ├── 03_skill_demand.py     # Skill Demand Forecast (Prophet)
 │           └── 04_job_insights.py
 │
 ├── tests/
@@ -186,8 +197,47 @@ Build after Phase 4 is confirmed working.
 Details: TBD — ask for spec when Phase 4 is done.
 
 ### Phase 6 — Streamlit app + EC2 hosting
-Build after Phase 5 is confirmed working.
-Details: TBD — ask for spec when Phase 5 is done.
+Build after Phase 5 is confirmed working. Hosting details (EC2, nginx,
+systemd, deploy): ask for spec when Phase 5 is done.
+
+App direction (set 2026-10-04): a resume intelligence tool, not a generic
+market dashboard.
+
+- Page 1 — Resume Analyzer (was Market Overview). User uploads a resume PDF;
+  text extracted with pdfplumber; skills found with regex + keyword matching
+  using the same skill dictionary as src/processing/extract_skills.py
+  (no LLM). Shows:
+  - Skills found on the resume + how often each appears in real postings
+  - Match % against each target role
+  - Predicted salary (XGBoost model from Phase 5)
+  - Top 3 missing skills with estimated salary impact
+  - Real matching job postings from this week
+- Page 2 — Salary Explorer
+- Page 3 — Skill Demand Forecast
+- Page 4 — Job Insights
+
+Decisions:
+- Skill dictionary shared without Spark: move SKILLS / CASE_SENSITIVE /
+  CUSTOM_PATTERNS / skill_patterns() into a Spark-free module imported by
+  both extract_skills.py and the app (the app server has no PySpark/Java).
+- Resumes are personal data: parse in memory only; never write uploads or
+  their text to disk, S3 or logs.
+- Text-based PDFs only (no OCR); a scanned/image-only PDF yields no text →
+  show a clear message instead of an empty analysis.
+
+Open questions (decide before building):
+- Match % formula (e.g. demand-weighted share of a role's top skills found).
+- Salary impact of a missing skill: model what-if vs. median salary of
+  postings with vs. without the skill. Both are associations, not causal —
+  UI wording must say "associated with".
+- "This week's postings" needs ingestion at least weekly; the JSearch free
+  plan (200 requests/month) limits how many postings that covers.
+
+Needs from earlier phases:
+- Phase 3 marts: skill frequency per role, recent postings with their
+  skills, salary by skill.
+- Phase 5 salary model: features must all be derivable from a resume
+  (target role, skills, seniority, location).
 
 ---
 

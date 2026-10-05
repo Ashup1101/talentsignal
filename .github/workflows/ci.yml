@@ -11,7 +11,9 @@ on:
 jobs:
   test:
     name: pytest
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest (which moves to Ubuntu 26 on 2026-10-19)
+    # so CI only changes when we choose to upgrade it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
