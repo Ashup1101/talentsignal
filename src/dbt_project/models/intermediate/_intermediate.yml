@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: int_jobs_enriched
+    description: One row per posting with seniority, skill_count, UTC posting date/week and star-schema keys.
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
+      - name: role_key
+        data_tests: [not_null]
+      - name: location_key
+        data_tests: [not_null]
+      - name: seniority
+        description: Rule-based from the title; 'mid' when no level word (see seniority_from_title).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [intern, junior, mid, senior, staff_plus, manager]
+
+  - name: int_job_skills_joined
+    description: One row per (posting, skill) with the posting attributes skill marts group by.
+    data_tests:
+      - unique:
+          column_name: "job_id || '|' || skill_name"

@@ -1,0 +1,72 @@
+version: 2
+
+models:
+  # --- Star schema ---------------------------------------------------------
+  - name: dim_role
+    description: One row per search role with its SOC code and BLS benchmark.
+    columns:
+      - name: role_key
+        data_tests: [unique, not_null]
+      - name: role_name
+        data_tests: [unique, not_null]
+
+  - name: dim_location
+    description: One row per city + state + country, plus one 'Unknown' member.
+    columns:
+      - name: location_key
+        data_tests: [unique, not_null]
+
+  - name: fact_job_postings
+    description: One row per job posting; measures plus keys to dim_role and dim_location.
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
+      - name: role_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_role')
+                field: role_key
+      - name: location_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_location')
+                field: location_key
+
+  # --- Marts ---------------------------------------------------------------
+  - name: mart_salary_bands
+    description: Salary percentiles per role vs the BLS median.
+    columns:
+      - name: role_name
+        data_tests: [unique, not_null]
+      - name: sample_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ok, too_few_to_report]
+
+  - name: mart_skill_demand
+    description: Share of a role's postings mentioning each skill, per week.
+    data_tests:
+      - unique:
+          column_name: "posted_week || '|' || search_role || '|' || skill_name"
+
+  - name: mart_skill_salary
+    description: Median salary with vs. without each skill (association, not causation).
+    columns:
+      - name: skill_name
+        data_tests: [unique, not_null]
+      - name: sample_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ok, too_few_to_report]
+
+  - name: mart_job_trends
+    description: Weekly postings per role and state, with share remote and share with salary.
+    data_tests:
+      - unique:
+          column_name: "posted_week || '|' || role_name || '|' || state_code"

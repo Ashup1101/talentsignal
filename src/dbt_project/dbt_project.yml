@@ -12,6 +12,10 @@ seed-paths: ["seeds"]
 test-paths: ["tests"]
 clean-targets: ["target", "dbt_packages"]
 
+vars:
+  # Salary statistics from fewer postings than this are reported as "too few".
+  min_salary_sample: 5
+
 # Schemas are named <target schema>_<folder schema>, e.g. analytics_staging.
 models:
   talentsignal:

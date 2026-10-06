@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: stg_jobs
+    description: One row per unique job posting (raw.jobs_clean with clearer column names).
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
+      - name: search_role
+        description: The role searched for; must exist in the role_soc_mapping seed.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('role_soc_mapping')
+                field: search_role
+      - name: salary_flag
+        description: Why the salary was discarded, if it was (NULL = salary kept or absent).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [out_of_range, unknown_period, inverted_range]
+
+  - name: stg_skills
+    description: One row per (job posting, skill).
+    data_tests:
+      - unique:
+          column_name: "job_id || '|' || skill_name"
+    columns:
+      - name: job_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_jobs')
+                field: job_id
+      - name: skill_name
+        data_tests: [not_null]
+      - name: skill_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [language, data_engineering, database, cloud, devops, ml_ai, analytics_bi, web]
+
+  - name: stg_bls_occupations
+    description: One row per BLS detailed occupation.
+    columns:
+      - name: soc_code
+        data_tests: [unique, not_null]

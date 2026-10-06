@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Tables copied from the processed Delta zone (s3://…-processed/delta/) by
+      src/processing/load_postgres.py. Each load replaces every row and stamps
+      _loaded_at with one shared timestamp.
+    schema: raw
+    config:
+      loaded_at_field: _loaded_at
+      freshness:
+        # Warn (not fail) if the loader hasn't run for 2 days.
+        warn_after: {count: 2, period: day}
+    tables:
+      - name: jobs_clean
+        description: >
+          One row per unique job posting from JSearch (deduplicated by job_id,
+          then by normalized title + employer + city), with annualized salaries.
+      - name: job_skills
+        description: One row per (job_id, skill) found by the dictionary-based skill extractor.
+      - name: bls_occupations
+        description: BLS OEWS national estimates, one row per detailed occupation (SOC code).

@@ -1,0 +1,10 @@
+version: 2
+
+seeds:
+  - name: role_soc_mapping
+    description: >
+      The 5 search roles mapped to BLS SOC codes using O*NET 31.0 (job titles and
+      worker-reported titles). Data analyst has no code by decision (2026-10-05).
+    columns:
+      - name: search_role
+        data_tests: [unique, not_null]
