@@ -30,6 +30,7 @@ src/dbt_project/target/
 src/dbt_project/dbt_packages/
 src/dbt_project/logs/
 src/dbt_project/profiles.yml
+src/dbt_project/.user.yml
 
 # Airflow (local Docker Compose)
 infra/logs/

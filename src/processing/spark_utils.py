@@ -42,11 +42,13 @@ def _hadoop_version() -> str:
     raise RuntimeError(f"No hadoop-client-api jar found in {jars}; is pyspark installed correctly?")
 
 
-def get_spark(app_name: str) -> SparkSession:
+def get_spark(app_name: str, extra_packages: list[str] | None = None) -> SparkSession:
     """Return a SparkSession with Delta Lake and S3 access configured.
 
     Args:
         app_name: Name shown in the Spark UI (http://localhost:4040 while a local job runs).
+        extra_packages: Additional Maven coordinates to fetch locally (e.g. a JDBC
+            driver). Ignored on Databricks, whose runtime bundles common drivers.
 
     Returns:
         The Databricks-provided session on Databricks, otherwise a local session.
@@ -73,8 +75,8 @@ def get_spark(app_name: str) -> SparkSession:
         # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in the environment.
         .config("spark.hadoop.fs.s3a.endpoint.region", require_env("AWS_REGION"))
     )
-    hadoop_aws = f"org.apache.hadoop:hadoop-aws:{_hadoop_version()}"
-    spark = configure_spark_with_delta_pip(builder, extra_packages=[hadoop_aws]).getOrCreate()
+    packages = [f"org.apache.hadoop:hadoop-aws:{_hadoop_version()}", *(extra_packages or [])]
+    spark = configure_spark_with_delta_pip(builder, extra_packages=packages).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     return spark
 

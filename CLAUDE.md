@@ -79,21 +79,31 @@ talentsignal/
 │   │   ├── spark_utils.py        # SparkSession (local Delta + S3A / Databricks), bucket URIs
 │   │   ├── clean_jobs.py         # flatten JSON, deduplicate, normalize
 │   │   ├── clean_bls.py          # BLS raw snapshots → occupations table
-│   │   └── extract_skills.py     # PySpark UDF for skill extraction
+│   │   ├── extract_skills.py     # PySpark UDF for skill extraction
+│   │   └── load_postgres.py      # Delta tables → RDS raw schema (JDBC)
 │   │
 │   ├── dbt_project/              # full dbt project lives here
 │   │   ├── dbt_project.yml
 │   │   ├── profiles.yml.example
 │   │   ├── models/
+│   │   │   ├── sources.yml       # raw.* tables loaded by load_postgres.py
 │   │   │   ├── staging/
 │   │   │   │   ├── stg_jobs.sql
-│   │   │   │   └── stg_skills.sql
+│   │   │   │   ├── stg_skills.sql
+│   │   │   │   └── stg_bls_occupations.sql
 │   │   │   ├── intermediate/
+│   │   │   │   ├── int_jobs_enriched.sql
 │   │   │   │   └── int_job_skills_joined.sql
 │   │   │   └── marts/
+│   │   │       ├── dim_role.sql
+│   │   │       ├── dim_location.sql
+│   │   │       ├── fact_job_postings.sql
 │   │   │       ├── mart_job_trends.sql
 │   │   │       ├── mart_salary_bands.sql
-│   │   │       └── mart_skill_demand.sql
+│   │   │       ├── mart_skill_demand.sql
+│   │   │       └── mart_skill_salary.sql
+│   │   ├── seeds/
+│   │   │   └── role_soc_mapping.csv
 │   │   └── tests/
 │   │
 │   ├── dags/                     # Airflow DAGs
@@ -185,8 +195,51 @@ Deliverable (met 2026-10-03, local): 702 raw → 688 clean postings; 5,202
 skill mentions, 655 of 688 postings with ≥1 skill; 830 BLS occupations.
 
 ### Phase 3 — dbt modeling
-Build after Phase 2 is confirmed working.
-Details: TBD — ask for spec when Phase 2 is done.
+Spec approved 2026-10-04. dbt-core 1.12 + dbt-postgres 1.11.
+
+Database: AWS RDS PostgreSQL, created by the user in the console (not
+Terraform — keeps talentsignal-dev limited to S3). us-east-2, db.t4g.micro,
+20 GB gp3, Single-AZ, current major version (no Extended Support fees),
+public access restricted to the developer's IP, SSL required. List price
+≈ $17.63/month ($11.68 instance + $2.30 storage + $3.65 public IPv4).
+
+- Load — src/processing/load_postgres.py (Spark + JDBC): read
+  delta/jobs_clean, delta/job_skills, delta/bls_occupations and overwrite
+  raw.jobs_clean / raw.job_skills / raw.bls_occupations, adding _loaded_at.
+  Overwrite matches Phase 2's full-rebuild approach (append would duplicate
+  rows on every rerun).
+- profiles.yml reads the connection from env vars via env_var(); only
+  profiles.yml.example is committed.
+- Materializations: staging + intermediate = views; marts = tables.
+- sources.yml: the 3 raw tables; freshness warns if _loaded_at > 2 days old.
+- Seed role_soc_mapping.csv: the 5 search roles → BLS SOC codes, sourced
+  from O*NET alternate titles with a source column. Show the mapping to the
+  user before using it.
+- Staging (1:1 with sources; rename/cast only): stg_jobs, stg_skills,
+  stg_bls_occupations.
+- Intermediate: int_jobs_enriched (rule-based seniority from title:
+  intern / junior / mid / senior / staff+ / manager; skill_count),
+  int_job_skills_joined (skills + role, location, posted week).
+- Star schema (keys = md5 of natural keys, stable across rebuilds):
+  - dim_role — one row per search role; SOC code, BLS median wage, employment
+  - dim_location — one row per city + state, plus an 'Unknown' member
+  - fact_job_postings — one row per posting; role/location keys,
+    posted_date, seniority, is_remote, salary min/mid/max, has_salary,
+    skill_count
+- Marts:
+  - mart_job_trends — week × role × state: postings, % remote, % with salary
+  - mart_salary_bands — per role: p25 / median / p75 salary vs BLS median;
+    groups with < 5 salaries marked as too few to report
+  - mart_skill_demand — week × role × skill: postings mentioning it + share
+    of the role's postings (feeds Prophet in Phase 5)
+  - mart_skill_salary — per skill: median salary of postings that mention
+    it vs. those that don't, with n on each side (feeds the app's
+    missing-skill salary impact; an association, not a causal effect)
+- Tests: unique / not_null keys, relationships fact → dims, accepted_values
+  (skill category, salary_flag), singular tests (salary min ≤ max, shares
+  in [0, 1]).
+- CI: dbt build on PRs against a throwaway Postgres service container with
+  small test-only fixtures — no RDS credentials in GitHub.
 
 ### Phase 4 — Airflow orchestration
 Build after Phase 3 is confirmed working.

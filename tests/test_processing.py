@@ -6,13 +6,14 @@ import json
 import os
 import sys
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
-from src.processing import clean_bls, clean_jobs, extract_skills
+from src.processing import clean_bls, clean_jobs, extract_skills, load_postgres
 
 
 @pytest.fixture(scope="session")
@@ -238,3 +239,32 @@ def test_latest_occupations_keeps_newest_snapshot(spark: SparkSession, tmp_path:
     rows = clean_bls.latest_occupations(raw).collect()
 
     assert [(r.occupation_code, r.median_wage) for r in rows] == [("15-2051", 120230)]
+
+
+# --- load_postgres ------------------------------------------------------------
+
+
+def test_with_loaded_at_stamps_the_whole_batch_once(spark: SparkSession) -> None:
+    df = spark.createDataFrame([("a",), ("b",)], "job_id string")
+    loaded = load_postgres.with_loaded_at(df, datetime(2026, 10, 5, 12, 30, tzinfo=timezone.utc))
+
+    stamps = loaded.select(F.date_format("_loaded_at", "yyyy-MM-dd HH:mm:ss").alias("t")).distinct().collect()
+
+    assert [r.t for r in stamps] == ["2026-10-05 12:30:00"]
+
+
+def test_postgres_config_jdbc_url_requires_tls_and_omits_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = {"RDS_HOST": "db.example.com", "RDS_PORT": "5432", "RDS_DB": "talentsignal", "RDS_USER": "loader", "RDS_PASSWORD": "s3cret-pw"}
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    config = load_postgres.PostgresConfig.from_env()
+
+    assert config.jdbc_url == "jdbc:postgresql://db.example.com:5432/talentsignal?sslmode=require&reWriteBatchedInserts=true"
+    assert "s3cret-pw" not in config.jdbc_url
+
+
+def test_postgres_config_requires_every_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RDS_HOST", raising=False)
+    with pytest.raises(ValueError, match="RDS_HOST is not set"):
+        load_postgres.PostgresConfig.from_env()

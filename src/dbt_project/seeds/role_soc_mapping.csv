@@ -1,0 +1,6 @@
+search_role,soc_code,onet_soc_code,onet_title,evidence,source
+data engineer,15-1243,15-1243.00,Database Architects,"Workers in this occupation report the job title ""Data Engineer"" (O*NET sample of reported titles)",O*NET 31.0
+data scientist,15-2051,15-2051.00,Data Scientists,Official O*NET occupation title,O*NET 31.0
+machine learning engineer,15-2051,15-2051.00,Data Scientists,"O*NET alternate title; occupation description: ""Apply data mining, data modeling, natural language processing, and machine learning""",O*NET 31.0
+data analyst,,,,"No BLS benchmark by decision (2026-10-05): O*NET's closest match, Business Intelligence Analysts (15-2051.01), is grouped by BLS with Data Scientists, which would overstate analyst pay",O*NET 31.0
+software engineer,15-1252,15-1252.00,Software Developers,"Workers in this occupation report the job title ""Software Engineer"" (O*NET sample of reported titles)",O*NET 31.0

@@ -1,0 +1,18 @@
+# Copy to profiles.yml (git-ignored). No secrets here: every value comes from
+# environment variables (see "Secrets needed" in CLAUDE.md). dbt does not read
+# .env itself, so run it through python-dotenv from the repo root:
+#   dotenv -f .env run -- dbt debug --project-dir src/dbt_project --profiles-dir src/dbt_project
+talentsignal:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('RDS_HOST') }}"
+      port: "{{ env_var('RDS_PORT') | as_number }}"
+      dbname: "{{ env_var('RDS_DB') }}"
+      user: "{{ env_var('RDS_USER') }}"
+      password: "{{ env_var('RDS_PASSWORD') }}"
+      schema: analytics
+      sslmode: require
+      threads: 4
+      connect_timeout: 10
