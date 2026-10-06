@@ -13,6 +13,8 @@ talentsignal:
       user: "{{ env_var('RDS_USER') }}"
       password: "{{ env_var('RDS_PASSWORD') }}"
       schema: analytics
-      sslmode: require
+      # TLS required by default (laptop → RDS). Only the CI job sets
+      # DBT_SSLMODE=disable for its throwaway Postgres container.
+      sslmode: "{{ env_var('DBT_SSLMODE', 'require') }}"
       threads: 4
       connect_timeout: 10

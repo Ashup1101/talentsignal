@@ -104,6 +104,9 @@ talentsignal/
 │   │   │       └── mart_skill_salary.sql
 │   │   ├── seeds/
 │   │   │   └── role_soc_mapping.csv
+│   │   ├── ci/                   # dbt CI: throwaway Postgres on every PR
+│   │   │   ├── make_fixtures.py  # regenerates raw_fixtures.sql from RDS (read-only)
+│   │   │   └── raw_fixtures.sql  # real 50-posting sample of raw.*
 │   │   └── tests/
 │   │
 │   ├── dags/                     # Airflow DAGs
@@ -125,6 +128,7 @@ talentsignal/
 ├── tests/
 │   ├── test_ingestion.py
 │   ├── test_processing.py        # local SparkSession, no S3/Delta
+│   ├── test_dbt_ci.py            # dbt CI fixture generator (fake cursor)
 │   └── test_ml.py
 │
 └── .github/
