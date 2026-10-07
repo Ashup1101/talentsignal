@@ -257,7 +257,8 @@ Status: COMPLETE (2026-10-06).
   rows, counts verified after load.
 - `dbt build` on RDS: PASS=57 (1 seed, 12 models, 44 tests) in ~7 s;
   `dbt source freshness` PASS.
-- dbt CI job merged (PR #1): Postgres 18 service + real 50-posting fixture
+- dbt CI job merged (PR #1 in the original repo, recreated 2026-10-07):
+  Postgres 18 service + real 50-posting fixture
   (src/dbt_project/ci/), PASS=57 on GitHub.
 
 Findings to carry forward:
@@ -272,7 +273,9 @@ Findings to carry forward:
   far more weeks and zero-filled weekly series.
 
 Open items:
-- load_postgres: jobs_clean took ~4 min for ~4 MB; profile in the Spark UI.
+- load_postgres: jobs_clean took ~4 min for ~4 MB on the first manual load
+  (2026-10-05). NOT REPRODUCED: both Airflow runs took ~22 s (see Phase 4
+  status); watch load_postgres duration in Airflow's run history.
 - Console check: RDS storage type/size, Multi-AZ, Secrets Manager.
 - Remove the two CloudShell IPs from the RDS security group.
 - Upgrade sslmode require → verify-full (RDS CA bundle).
@@ -357,6 +360,35 @@ Deliverable: `infra/airflow/install.sh` once, then `infra/airflow/run_local.sh`
 green end to end
 (new raw files for the day's rotated pairs, marts rebuilt in RDS); both
 CI jobs + the DAG test job green.
+
+Status: COMPLETE (2026-10-07).
+- First runs (2026-10-07), both green on the first try:
+  1. Unpausing talentsignal_pipeline immediately started a SCHEDULED run for
+     the most recent missed slot (logical date 2026-10-06 22:00). catchup=False
+     still runs the latest missed slot, so "unpause" = "run now". The 1-day
+     grace let it fetch: 1 pair (data engineer / New York, NY), 3 requests,
+     26 postings, file dated 2026-10-07; RapidAPI reported 118 remaining.
+     118.5 s end to end.
+  2. The MANUAL run queued behind it (max_active_runs=1), found today's
+     allowance spent (75 + 3 used → 0 pairs) and fetched nothing, then rebuilt
+     everything in 90.6 s. Total JSearch spend: 3 requests, no double spend.
+- Results: raw.jobs_clean 688 → 704 (+16 new unique postings), raw.job_skills
+  5,202 → 5,374; dbt build PASS=57; source freshness PASS.
+- Task times, s (scheduled | manual): fetch_jobs 23.7 | 1.5, clean_jobs
+  28.5 | 23.9, extract_skills 28.7 | 28.0, load_postgres 21.8 | 22.2,
+  dbt_source_freshness 5.4 | 4.1, dbt_build 7.9 | 8.0.
+- load_postgres speed finding: ~22 s per run; raw.jobs_clean (704 rows)
+  written ~15 s after task start including Spark startup, job_skills ~3 s,
+  bls_occupations ~2 s. The ~4 min first manual load (2026-10-05) did not
+  recur with unchanged code; cause not isolated (likely a one-off of that
+  session, e.g. network or first connection setup). Airflow now records every
+  task's duration, so a regression would show in the run history.
+- DAG left PAUSED. Nightly 22:00 UTC runs need: DAG switched on in the
+  dashboard + infra/airflow/run_local.sh running + the Mac awake.
+- Still open: a stop_local.sh for background runs (pkill on `airflow
+  standalone` orphans its components; Ctrl+C in a terminal is fine);
+  OBJC_DISABLE_INITIALIZE_FORK_SAFETY kept set (runs succeeded with it,
+  not tested without).
 
 Phase 4b (later, separate cost approval): Databricks workspace + jobs;
 swap clean_jobs / extract_skills / load_postgres to

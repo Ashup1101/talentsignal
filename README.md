@@ -14,7 +14,7 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 | 1     | Ingestion (JSearch, BLS → S3)  | Done        |
 | 2     | PySpark processing             | Done (local; Databricks pending) |
 | 3     | dbt modeling                   | Done        |
-| 4     | Airflow orchestration          | Not started |
+| 4     | Airflow orchestration          | Done        |
 | 5     | NLP + ML models                | Not started |
 | 6     | Streamlit app + EC2 hosting    | Not started |
 
@@ -61,6 +61,29 @@ python -m src.processing.clean_bls       # → delta/bls_occupations
 Each job rebuilds its Delta table from scratch, so reruns are safe. While one
 runs locally, the Spark UI is at http://localhost:4040. The first run
 downloads the Delta and S3 connector jars (a few hundred MB, cached in ~/.ivy2).
+
+## Phase 4: orchestrate with Airflow
+
+Airflow 3 runs locally in its own virtualenv (its pinned libraries conflict with
+the pipeline's), with no Docker:
+
+```bash
+infra/airflow/install.sh     # once: .venv-airflow with Airflow 3.3.1 + constraints
+infra/airflow/run_local.sh   # UI on http://localhost:8080 (Ctrl+C stops it)
+```
+
+Login: user `admin`, password in `.airflow/simple_auth_manager_passwords.json.generated`.
+
+- `talentsignal_pipeline` (daily, 22:00 UTC): fetch_jobs → clean_jobs →
+  extract_skills → load_postgres → dbt_source_freshness → dbt_build
+- `talentsignal_bls` (monthly): fetch_bls → clean_bls
+
+Both DAGs start paused, so nothing runs or spends JSearch quota until switched
+on. Switching a DAG on immediately runs its most recent missed slot.
+
+First end-to-end runs (2026-10-07): about 2 minutes with a JSearch fetch (118.5 s),
+91 s without. `load_postgres` took ~22 s in both runs, compared with ~4 min on the
+first manual load, which hasn't recurred.
 
 Dependencies are declared in `pyproject.toml` and pinned with pip-tools:
 
