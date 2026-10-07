@@ -46,7 +46,9 @@ the actual result (e.g. real held-out MAE), even if it misses the target.
 - Storage:          AWS S3 (raw / processed / curated zones), AWS RDS PostgreSQL
 - Processing:       PySpark, Databricks (Delta Lake format)
 - Transformation:   dbt Core (dbt-postgres adapter)
-- Orchestration:    Apache Airflow 2.x (Docker Compose locally)
+- Orchestration:    Apache Airflow 3.x, pip-installed in its own virtualenv and
+                    run locally with `airflow standalone` (no Docker; Docker is
+                    deferred to Phase 6). 2.x dropped: end of life 2026-04-22.
 - NLP:              spaCy, sentence-transformers, BERTopic, VADER
 - ML:               XGBoost, Prophet, scikit-learn, MLflow (Databricks-hosted)
 - App:              Streamlit, pdfplumber (resume PDF → text)
@@ -65,7 +67,10 @@ talentsignal/
 │
 ├── infra/
 │   ├── terraform/                # S3 buckets, RDS, EC2 (scaffold only for now)
-│   └── docker-compose.yml        # Airflow local dev
+│   ├── airflow/
+│   │   ├── install.sh            # creates .venv-airflow: Airflow 3 + constraints
+│   │   └── run_local.sh          # env vars + `airflow standalone` (UI :8080)
+│   └── docker-compose.yml        # Phase 6 app containers (not used for Airflow)
 │
 ├── src/
 │   ├── ingestion/
@@ -110,7 +115,8 @@ talentsignal/
 │   │   └── tests/
 │   │
 │   ├── dags/                     # Airflow DAGs
-│   │   └── talentsignal_pipeline.py
+│   │   ├── talentsignal_pipeline.py  # daily: ingest → Spark → load → dbt
+│   │   └── talentsignal_bls.py       # monthly: BLS fetch → clean
 │   │
 │   ├── ml/
 │   │   ├── nlp_pipeline.py       # spaCy + BERTopic skill extraction + clustering
@@ -129,6 +135,7 @@ talentsignal/
 │   ├── test_ingestion.py
 │   ├── test_processing.py        # local SparkSession, no S3/Delta
 │   ├── test_dbt_ci.py            # dbt CI fixture generator (fake cursor)
+│   ├── test_dags.py              # DAGs import cleanly; task order (own CI job)
 │   └── test_ml.py
 │
 └── .github/
@@ -245,9 +252,104 @@ public access restricted to the developer's IP, SSL required. List price
 - CI: dbt build on PRs against a throwaway Postgres service container with
   small test-only fixtures — no RDS credentials in GitHub.
 
+Status: COMPLETE (2026-10-06).
+- Loader: raw.jobs_clean 688, raw.job_skills 5,202, raw.bls_occupations 830
+  rows, counts verified after load.
+- `dbt build` on RDS: PASS=57 (1 seed, 12 models, 44 tests) in ~7 s;
+  `dbt source freshness` PASS.
+- dbt CI job merged (PR #1): Postgres 18 service + real 50-posting fixture
+  (src/dbt_project/ci/), PASS=57 on GitHub.
+
+Findings to carry forward:
+- mart_skill_salary differences mostly reflect role mix (Excel −$65K,
+  React +$45K): the app must compare within the same role before showing
+  any "salary impact".
+- 43% of titles state no seniority (seniority_from_title = false); the
+  Phase 5 salary model should use that flag.
+- Posted salary medians run 16–71% above BLS medians (expensive metros,
+  senior-leaning postings, ML engineer benchmarked to data scientists).
+- Only 5 weeks of posting history (2026-08-31 → 2026-09-28); Prophet needs
+  far more weeks and zero-filled weekly series.
+
+Open items:
+- load_postgres: jobs_clean took ~4 min for ~4 MB; profile in the Spark UI.
+- Console check: RDS storage type/size, Multi-AZ, Secrets Manager.
+- Remove the two CloudShell IPs from the RDS security group.
+- Upgrade sslmode require → verify-full (RDS CA bundle).
+- Rebuilding one view alone drops dependent views (DROP … CASCADE): rebuild
+  with `model+`, or run a full `dbt build`.
+
 ### Phase 4 — Airflow orchestration
-Build after Phase 3 is confirmed working.
-Details: TBD — ask for spec when Phase 3 is done.
+Spec approved 2026-10-06 (JSearch monthly budget 180 confirmed).
+
+Decisions (2026-10-06):
+- D1 Airflow 3.x (2.x end of life 2026-04-22).
+- D2 Hybrid: Spark steps run locally inside Airflow now; each stays its own
+  task so it can later become a DatabricksRunNowOperator (Phase 4b).
+- D3 JSearch free tier with daily rotation + hard monthly budget guard.
+- D4 (revised 2026-10-06) pip-install Airflow directly on the Mac — no
+  Docker/Colima for Phase 4. Docker is saved for Phase 6, where it earns
+  its place.
+- D5 Airflow runs on the laptop for Phase 4 (runs only while the Mac is on).
+
+Local runtime ($0, no Docker):
+- .venv-airflow/ (git-ignored): a SECOND virtualenv, Python 3.11, with
+  apache-airflow 3.3.x + the standard and databricks providers, installed
+  with pip and Airflow's official constraints file
+  (constraints-<version>/constraints-3.11.txt). Kept apart from .venv
+  because Airflow pins conflict with ours (e.g. pandas, boto3, psycopg2).
+- infra/airflow/install.sh — creates .venv-airflow and installs the pinned
+  version with its constraints. infra/airflow/run_local.sh — exports
+  AIRFLOW_HOME, the dags folder, JAVA_HOME and
+  OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES (macOS fork-safety crash; verify
+  whether needed), then runs `airflow standalone` (api-server with UI at
+  http://localhost:8080, scheduler, dag-processor, triggerer).
+- AIRFLOW_HOME = .airflow/ in the repo (git-ignored): config, logs and the
+  SQLite metadata DB. SQLite + LocalExecutor is Airflow 3's supported
+  local-dev setup; it runs one task at a time, which suits our linear DAG.
+  load_examples off; dags_folder = src/dags.
+- Tasks run the pipeline with the project's own .venv
+  (`.venv/bin/python -m …`, dbt via `.venv/bin/dotenv -f .env run -- dbt …`),
+  so Airflow's environment never imports pipeline code.
+
+DAGs (src/dags/), all tasks BashOperator calling the existing CLIs in the
+pipeline venv — the same commands that run by hand:
+- talentsignal_pipeline — daily 10:00 UTC, catchup=False,
+  max_active_runs=1, retries=1 (fetch_jobs: 2, 10 min apart):
+  fetch_jobs → clean_jobs → extract_skills → load_postgres →
+  dbt_source_freshness → dbt_build   (retrain_models added in Phase 5)
+- talentsignal_bls — monthly: fetch_bls → clean_bls (BLS publishes yearly;
+  the daily load_postgres picks up the latest delta/bls_occupations).
+
+Ingestion changes (src/ingestion/fetch_jobs.py):
+- CLI `--run-date {{ ds }}`. If the logical date isn't today (a backfill),
+  skip fetching — JSearch only returns current postings, so fetching for a
+  past date would mislabel data. Backfills rebuild downstream steps only.
+- Daily rotation over the 25 role × city pairs, 3 pages per pair; requests
+  per run = remaining monthly budget ÷ remaining days in the month.
+- Hard budget guard, two layers:
+  1. Calendar-month budget JSEARCH_MONTHLY_BUDGET (default 180 of the free
+     200), counted from an `api_requests` field now written into every raw
+     file envelope.
+  2. Stop immediately if RapidAPI's X-RateLimit-Requests-Remaining header
+     reports ≤ JSEARCH_RESERVE_REQUESTS (default 20).
+  Upgrading to the Pro plan later = changing these env values, not code.
+
+Tests / CI:
+- Unit tests for rotation, budget math and the backfill skip.
+- tests/test_dags.py: every DAG imports cleanly; task order matches the
+  spec. New CI job installs Airflow with its official constraints file in
+  its own environment (separate from the pytest job's dependencies).
+
+Deliverable: `infra/airflow/install.sh` once, then `infra/airflow/run_local.sh`
+→ Airflow UI on localhost:8080; a triggered talentsignal_pipeline run goes
+green end to end
+(new raw files for the day's rotated pairs, marts rebuilt in RDS); both
+CI jobs + the DAG test job green.
+
+Phase 4b (later, separate cost approval): Databricks workspace + jobs;
+swap clean_jobs / extract_skills / load_postgres to
+DatabricksRunNowOperator (+ triggerer if run deferrable).
 
 ### Phase 5 — NLP + ML models
 Build after Phase 4 is confirmed working.
@@ -259,6 +361,9 @@ systemd, deploy): ask for spec when Phase 5 is done.
 
 App direction (set 2026-10-04): a resume intelligence tool, not a generic
 market dashboard.
+
+Docker (decided 2026-10-06): not used for Airflow in Phase 4; it belongs
+here, e.g. containerizing the app for EC2 (infra/docker-compose.yml).
 
 - Page 1 — Resume Analyzer (was Market Overview). User uploads a resume PDF;
   text extracted with pdfplumber; skills found with regex + keyword matching
@@ -321,6 +426,8 @@ RDS_DB=talentsignal
 RDS_USER=
 RDS_PASSWORD=
 BLS_CONTACT_EMAIL=          # sent in the User-Agent; BLS blocks anonymous scripts
+JSEARCH_MONTHLY_BUDGET=180  # Phase 4: hard cap on JSearch requests per calendar month
+JSEARCH_RESERVE_REQUESTS=20 # Phase 4: stop if RapidAPI reports this many or fewer left
 ```
 
 ## What to do if you're blocked

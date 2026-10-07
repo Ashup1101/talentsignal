@@ -13,7 +13,7 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 |-------|--------------------------------|-------------|
 | 1     | Ingestion (JSearch, BLS → S3)  | Done        |
 | 2     | PySpark processing             | Done (local; Databricks pending) |
-| 3     | dbt modeling                   | Not started |
+| 3     | dbt modeling                   | Done        |
 | 4     | Airflow orchestration          | Not started |
 | 5     | NLP + ML models                | Not started |
 | 6     | Streamlit app + EC2 hosting    | Not started |
