@@ -241,6 +241,23 @@ def test_plan_run_picks_least_recently_fetched_pairs_first() -> None:
     assert plan.pairs == [pairs[3]]
 
 
+def test_rotation_samples_every_role_in_every_week() -> None:
+    # Simulate 25 days at 1 pair/day (the free-plan pace): budget 75 → 3 requests/day.
+    keys: list[str] = []
+    picks: list[tuple[str, str]] = []
+    for day in range(1, 26):
+        today = date(2026, 12, day)
+        plan = fetch_jobs.plan_run(keys, today, monthly_budget=3 * 31)
+        assert len(plan.pairs) == 1, today
+        picks.extend(plan.pairs)
+        keys.extend(_keys_for(plan.pairs, today))
+
+    assert sorted(picks) == sorted(fetch_jobs.ALL_PAIRS)  # every pair exactly once in 25 days
+    for start in range(len(picks) - 6):
+        week_roles = {role for role, _ in picks[start : start + 7]}
+        assert week_roles == set(fetch_jobs.SAMPLE_ROLES), f"days {start + 1}–{start + 7}"
+
+
 def test_plan_run_never_spends_more_on_a_same_day_rerun() -> None:
     today = date(2026, 11, 1)  # 180 // 30 days = 6 requests → 2 pairs
     first = fetch_jobs.plan_run([], today, monthly_budget=180)
