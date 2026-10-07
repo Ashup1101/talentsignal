@@ -314,7 +314,8 @@ Local runtime ($0, no Docker):
 
 DAGs (src/dags/), all tasks BashOperator calling the existing CLIs in the
 pipeline venv — the same commands that run by hand:
-- talentsignal_pipeline — daily 10:00 UTC, catchup=False,
+- talentsignal_pipeline — daily 22:00 UTC (10 pm; 6 pm US Eastern),
+  cron "0 22 * * *", catchup=False,
   max_active_runs=1, retries=1 (fetch_jobs: 2, 10 min apart):
   fetch_jobs → clean_jobs → extract_skills → load_postgres →
   dbt_source_freshness → dbt_build   (retrain_models added in Phase 5)
@@ -322,18 +323,28 @@ pipeline venv — the same commands that run by hand:
   the daily load_postgres picks up the latest delta/bls_occupations).
 
 Ingestion changes (src/ingestion/fetch_jobs.py):
-- CLI `--run-date {{ ds }}`. If the logical date isn't today (a backfill),
-  skip fetching — JSearch only returns current postings, so fetching for a
-  past date would mislabel data. Backfills rebuild downstream steps only.
-- Daily rotation over the 25 role × city pairs, 3 pages per pair; requests
-  per run = remaining monthly budget ÷ remaining days in the month.
+- CLI `--run-date {{ ds }}`. Logical dates older than yesterday are
+  backfills: skip fetching (JSearch only returns current postings) and exit 0
+  so downstream steps rebuild from existing raw files. Today or yesterday
+  still fetches (1-day grace for late runs, e.g. the Mac asleep at 22:00).
+  Raw files are always dated by the actual UTC fetch date, never the
+  logical date, so nothing is mislabeled. `--dry-run` logs the plan with no
+  API calls or writes.
+- plan_run(): least-recently-fetched rotation over the 25 role × city pairs
+  (never-fetched first, ties in fixed order), 3 pages per pair. Today's
+  allowance = (budget left before today) ÷ (days left in the month) − what
+  today already spent, so a same-day rerun spends nothing extra.
 - Hard budget guard, two layers:
   1. Calendar-month budget JSEARCH_MONTHLY_BUDGET (default 180 of the free
-     200), counted from an `api_requests` field now written into every raw
-     file envelope.
-  2. Stop immediately if RapidAPI's X-RateLimit-Requests-Remaining header
-     reports ≤ JSEARCH_RESERVE_REQUESTS (default 20).
+     200): used = 3 × raw files dated this month, from the S3 listing alone
+     (an upper bound; no downloads, so it scales to paid tiers). Each new
+     envelope also records `api_requests` as an audit trail.
+  2. RequestLog: before every request, refuse if RapidAPI's
+     X-RateLimit-Requests-Remaining last reported ≤ JSEARCH_RESERVE_REQUESTS
+     (default 20) → JSearchBudgetExhausted, run stops with exit 0.
   Upgrading to the Pro plan later = changing these env values, not code.
+- Verified 2026-10-07 (dry run on real S3): 75 used in October, 25 days
+  left → 4 requests/day → 1 pair/day on the free plan (2/day from November).
 
 Tests / CI:
 - Unit tests for rotation, budget math and the backfill skip.

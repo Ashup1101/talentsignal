@@ -38,9 +38,17 @@ python -m src.ingestion.fetch_bls    # s3://$S3_RAW_BUCKET/bls/raw/{date}.json
 python -m src.ingestion.fetch_jobs   # s3://$S3_RAW_BUCKET/jobs/raw/{role}/{location}/{date}.json
 ```
 
-Both are idempotent per day: an existing object is never overwritten, and
-`fetch_jobs` skips role/location pairs already landed today without calling
-the API, so reruns don't spend JSearch quota.
+Both are idempotent per day: an existing object is never overwritten.
+
+`fetch_jobs` stays inside a monthly JSearch budget (`JSEARCH_MONTHLY_BUDGET`,
+default 180 of the free plan's 200): each run fetches only today's share, rotating
+through the 25 role × city pairs least-recently-fetched first, and stops early if
+RapidAPI reports ≤ `JSEARCH_RESERVE_REQUESTS` (default 20) left. Same-day reruns
+spend nothing extra. See what tonight's run would do, without spending quota:
+
+```bash
+python -m src.ingestion.fetch_jobs --dry-run
+```
 
 ## Phase 2: clean and enrich with PySpark
 

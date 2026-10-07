@@ -1,7 +1,8 @@
 name: CI
 
-# pytest runs on every push / PR to main; dbt build runs on PRs against a
-# throwaway Postgres. Planned: Streamlit redeploy on push to main (Phase 6).
+# pytest and the Airflow DAG tests run on every push / PR to main; dbt build runs
+# on PRs against a throwaway Postgres. Planned: Streamlit redeploy on push to main
+# (Phase 6).
 on:
   push:
     branches: [main]
@@ -89,3 +90,29 @@ jobs:
         run: |
           cp src/dbt_project/profiles.yml.example src/dbt_project/profiles.yml
           dbt build --project-dir src/dbt_project --profiles-dir src/dbt_project
+
+  dags:
+    name: DAG tests (Airflow)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        id: python
+        with:
+          python-version: "3.11"
+          cache: pip
+          # install.sh pins the Airflow version, so it is the right cache key.
+          cache-dependency-path: infra/airflow/install.sh
+
+      # The same script as local setup: Airflow's version and constraints file are
+      # pinned in exactly one place. Airflow gets its own environment, apart from
+      # the pipeline's dependencies.
+      - name: Install Airflow (infra/airflow/install.sh)
+        run: infra/airflow/install.sh
+        env:
+          PYTHON_BIN: ${{ steps.python.outputs.python-path }}
+
+      - name: DAG tests
+        run: .venv-airflow/bin/pytest -q tests/test_dags.py

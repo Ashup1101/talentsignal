@@ -43,3 +43,7 @@ mlruns/
 .DS_Store
 .idea/
 .vscode/
+
+# Airflow (Phase 4): its own virtualenv and AIRFLOW_HOME (config, logs, SQLite DB)
+.venv-airflow/
+.airflow/

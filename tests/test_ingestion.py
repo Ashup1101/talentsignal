@@ -10,7 +10,7 @@ import io
 import json
 import zipfile
 from collections.abc import Iterator
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 import responses
@@ -105,11 +105,12 @@ def test_missing_aws_env_var_raises_value_error(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.fixture
 def fake_s3(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
-    """Replace S3 writes/existence checks with an in-memory {key: body} store."""
+    """Replace S3 writes, existence checks and listings with an in-memory {key: body} store."""
     monkeypatch.setenv("S3_RAW_BUCKET", BUCKET)
     store: dict[str, dict] = {}
     monkeypatch.setattr(s3_utils, "key_exists", lambda bucket, key: key in store)
     monkeypatch.setattr(s3_utils, "upload_json", lambda bucket, key, data: store.__setitem__(key, data))
+    monkeypatch.setattr(s3_utils, "list_keys", lambda bucket, prefix: [k for k in store if k.startswith(prefix)])
     return store
 
 
@@ -119,6 +120,9 @@ def fake_s3(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
 @pytest.fixture
 def jsearch_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAPIDAPI_KEY", "test-key")
+    # Pin the budget so values in a developer's .env can't change test outcomes.
+    monkeypatch.setenv("JSEARCH_MONTHLY_BUDGET", "180")
+    monkeypatch.setenv("JSEARCH_RESERVE_REQUESTS", "20")
 
 
 def _jsearch_page(*job_ids: str, cursor: str | None = "next") -> dict:
@@ -209,19 +213,115 @@ def test_save_jobs_never_overwrites(fake_s3: dict[str, dict]) -> None:
     assert fake_s3[key] == {"jobs": ["original"]}
 
 
+# --- fetch_jobs: daily plan, budget guards, backfill skip ---------------------
+
+
+def _keys_for(pairs: list[tuple[str, str]], day: date) -> list[str]:
+    return [fetch_jobs.raw_key(role, location, day) for role, location in pairs]
+
+
+def test_plan_run_counts_this_months_files_and_rotates_in_fixed_order() -> None:
+    # The real Oct 3 pull: all 25 pairs once.
+    keys = _keys_for(fetch_jobs.ALL_PAIRS, date(2026, 10, 3))
+
+    plan = fetch_jobs.plan_run(keys, date(2026, 10, 7), monthly_budget=180)
+
+    # 25 files × 3 = 75 used; (180 - 75) // 25 days left (Oct 7–31) = 4 → 1 pair.
+    assert (plan.used_before_today, plan.days_left, plan.allowance_today) == (75, 25, 4)
+    assert plan.pairs == [("data engineer", "New York, NY")]
+
+
+def test_plan_run_picks_least_recently_fetched_pairs_first() -> None:
+    pairs = fetch_jobs.ALL_PAIRS
+    keys = _keys_for(pairs[:3], date(2026, 11, 2)) + _keys_for(pairs[3:], date(2026, 11, 1))
+
+    plan = fetch_jobs.plan_run(keys, date(2026, 11, 3), monthly_budget=180)
+
+    # (180 - 75) // 28 days = 3 → 1 pair: the first of those last fetched on Nov 1.
+    assert plan.pairs == [pairs[3]]
+
+
+def test_plan_run_never_spends_more_on_a_same_day_rerun() -> None:
+    today = date(2026, 11, 1)  # 180 // 30 days = 6 requests → 2 pairs
+    first = fetch_jobs.plan_run([], today, monthly_budget=180)
+
+    rerun = fetch_jobs.plan_run(_keys_for(first.pairs, today), today, monthly_budget=180)
+
+    assert len(first.pairs) == 2
+    assert (rerun.used_today, rerun.pairs) == (6, [])
+
+
+def test_plan_run_ignores_last_months_files_for_the_budget() -> None:
+    keys = _keys_for(fetch_jobs.ALL_PAIRS, date(2026, 10, 31))
+
+    plan = fetch_jobs.plan_run(keys, date(2026, 11, 1), monthly_budget=180)
+
+    assert plan.used_before_today == 0
+    assert len(plan.pairs) == 2
+
+
+def test_plan_run_fetches_nothing_once_the_budget_is_spent() -> None:
+    keys = [k for day in (1, 2, 3) for k in _keys_for(fetch_jobs.ALL_PAIRS, date(2026, 11, day))]
+
+    plan = fetch_jobs.plan_run(keys, date(2026, 11, 4), monthly_budget=180)  # 75 files × 3 = 225 used
+
+    assert (plan.allowance_today, plan.pairs) == (0, [])
+
+
 @responses.activate
-def test_main_skips_landed_pairs_and_stops_on_access_error(
-    jsearch_env: None, fake_s3: dict[str, dict]
+def test_request_log_stops_before_going_below_the_reserve(jsearch_env: None) -> None:
+    responses.get(
+        fetch_jobs.JSEARCH_URL,
+        json=_jsearch_page("a", cursor="c1"),
+        headers={"X-RateLimit-Requests-Remaining": "20"},
+    )
+    request_log = fetch_jobs.RequestLog(reserve=20)
+
+    with pytest.raises(fetch_jobs.JSearchBudgetExhausted, match="20 requests left"):
+        fetch_jobs.fetch_jobs("data engineer", "Austin, TX", num_pages=3, request_log=request_log)
+
+    assert len(responses.calls) == 1  # the 2nd page was refused before it was requested
+    assert (request_log.made, request_log.remaining) == (1, 20)
+
+
+def test_main_skips_backfills_without_touching_s3_or_the_api(
+    jsearch_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for role in fetch_jobs.SAMPLE_ROLES:
-        for location in fetch_jobs.SAMPLE_LOCATIONS:
-            fake_s3[fetch_jobs.raw_key(role, location)] = {}
-    for role in fetch_jobs.SAMPLE_ROLES[:2]:
-        del fake_s3[fetch_jobs.raw_key(role, fetch_jobs.SAMPLE_LOCATIONS[0])]
+    def must_not_be_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a backfill must not list S3 or call JSearch")
+
+    monkeypatch.setattr(s3_utils, "list_keys", must_not_be_called)
+    monkeypatch.setattr(fetch_jobs, "fetch_jobs", must_not_be_called)
+    old_date = datetime.now(timezone.utc).date() - timedelta(days=5)
+
+    assert fetch_jobs.main(["--run-date", old_date.isoformat()]) == 0
+
+
+@responses.activate
+def test_main_still_fetches_a_run_that_starts_a_day_late(jsearch_env: None, fake_s3: dict[str, dict]) -> None:
+    responses.get(fetch_jobs.JSEARCH_URL, json=_jsearch_page("a", cursor=None))
+    today = datetime.now(timezone.utc).date()
+
+    assert fetch_jobs.main(["--run-date", (today - timedelta(days=1)).isoformat()]) == 0
+
+    written = [body for key, body in fake_s3.items() if key.endswith(f"{today.isoformat()}.json")]
+    assert written, "files are dated by the actual fetch day, not the logical date"
+    assert all(body["api_requests"] == 1 for body in written)
+
+
+@responses.activate
+def test_main_dry_run_plans_without_calling_the_api(jsearch_env: None, fake_s3: dict[str, dict]) -> None:
+    assert fetch_jobs.main(["--dry-run"]) == 0
+    assert len(responses.calls) == 0
+    assert fake_s3 == {}
+
+
+@responses.activate
+def test_main_stops_on_access_error(jsearch_env: None, fake_s3: dict[str, dict]) -> None:
     responses.get(fetch_jobs.JSEARCH_URL, status=403, json={"message": "Invalid API key."})
 
-    assert fetch_jobs.main() == 1
-    assert len(responses.calls) == 1  # landed pairs skipped; run stopped after the first 403
+    assert fetch_jobs.main([]) == 1
+    assert len(responses.calls) == 1  # no point trying the other pairs with a rejected key
 
 
 # --- fetch_bls ----------------------------------------------------------------
