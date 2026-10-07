@@ -14,6 +14,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from src.processing import clean_bls, clean_jobs, extract_skills, load_postgres
+from src.skills.dictionary import find_skills
 
 
 @pytest.fixture(scope="session")
@@ -159,35 +160,7 @@ def test_dedupe_by_content_prefers_salary_then_longer_description(spark: SparkSe
 # --- extract_skills -----------------------------------------------------------
 
 
-def _skills_in(text: str) -> set[str]:
-    return {name for name, rx in extract_skills.skill_patterns().items() if rx.search(text)}
-
-
-@pytest.mark.parametrize(
-    ("text", "expected", "not_expected"),
-    [
-        ("Experience with Python, Go, and Rust", {"Python", "Go", "Rust"}, set()),
-        ("We go above and beyond. Go-to-market strategy.", set(), {"Go"}),
-        ("Golang microservices", {"Go", "Microservices"}, set()),
-        ("Statistical modeling in Python or R.", {"Python", "R", "Statistics"}, set()),
-        ("Lead R&D initiatives", set(), {"R"}),
-        ("C++ and C# required", {"C++", "C#"}, set()),
-        ("PostgreSQL and NoSQL stores", {"PostgreSQL", "NoSQL"}, {"SQL"}),
-        ("JavaScript and TypeScript", {"JavaScript", "TypeScript"}, {"Java"}),
-        ("You will excel at storytelling", set(), {"Excel"}),
-        ("Advanced Excel and Power BI", {"Excel", "Power BI"}, set()),
-        ("Star and snowflake schema design", set(), {"Snowflake"}),
-        ("Snowflake, dbt and Airflow", {"Snowflake", "dbt", "Airflow"}, set()),
-        ("Built ETL with PySpark on AWS (S3, EMR)", {"ETL", "Spark", "AWS", "S3", "EMR"}, set()),
-        ("Be the glue between teams", set(), {"AWS Glue"}),
-        ("Goal setting, forecasting, and monitoring key metrics", set(), {"Time Series"}),
-        ("Time-series forecasting models (ARIMA)", {"Time Series"}, set()),
-    ],
-)
-def test_skill_patterns(text: str, expected: set[str], not_expected: set[str]) -> None:
-    found = _skills_in(text)
-    assert expected <= found, f"missing {expected - found}"
-    assert not (not_expected & found), f"false positives {not_expected & found}"
+# Pattern behaviour is tested Spark-free in tests/test_skills.py.
 
 
 def test_extract_skills_returns_job_skill_category_rows(spark: SparkSession) -> None:
@@ -212,10 +185,28 @@ def test_extract_skills_returns_job_skill_category_rows(spark: SparkSession) -> 
     }
 
 
-def test_every_skill_has_a_pattern_and_known_category() -> None:
-    categories = {"language", "data_engineering", "database", "cloud", "devops", "ml_ai", "analytics_bi", "web"}
-    assert set(extract_skills.skill_patterns()) == set(extract_skills.SKILLS)
-    assert {category for category, _ in extract_skills.SKILLS.values()} <= categories
+def test_spark_udf_matches_find_skills_exactly(spark: SparkSession) -> None:
+    # The UDF keeps its own one-line matching loop (so Spark workers need no repo
+    # on their path); this guards that it agrees with the shared find_skills().
+    texts = [
+        "Experience with Python, Go, and Rust",
+        "We go above and beyond. Go-to-market strategy.",
+        "Statistical modeling in Python or R. Lead R&D initiatives.",
+        "C++ and C# required; JavaScript and TypeScript a plus",
+        "You will excel at storytelling. Star and snowflake schema design.",
+        "Advanced Excel, Power BI, Snowflake, dbt and Airflow on AWS (S3, EMR)",
+        "Talk to people.",
+        "",
+    ]
+    jobs = spark.createDataFrame(
+        [(f"j{i}", None, text) for i, text in enumerate(texts)],
+        "job_id string, title string, description string",
+    )
+    from_spark: dict[str, set[str]] = {f"j{i}": set() for i in range(len(texts))}
+    for row in extract_skills.extract_skills(jobs).collect():
+        from_spark[row.job_id].add(row.skill)
+
+    assert from_spark == {f"j{i}": set(find_skills(text)) for i, text in enumerate(texts)}
 
 
 # --- clean_bls ----------------------------------------------------------------

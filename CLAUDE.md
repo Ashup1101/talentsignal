@@ -49,8 +49,10 @@ the actual result (e.g. real held-out MAE), even if it misses the target.
 - Orchestration:    Apache Airflow 3.x, pip-installed in its own virtualenv and
                     run locally with `airflow standalone` (no Docker; Docker is
                     deferred to Phase 6). 2.x dropped: end of life 2026-04-22.
-- NLP:              spaCy, sentence-transformers, BERTopic, VADER
-- ML:               XGBoost, Prophet, scikit-learn, MLflow (Databricks-hosted)
+- NLP:              spaCy, sentence-transformers, BERTopic (VADER dropped by the
+                    user 2026-10-07: no real use in this project)
+- ML:               XGBoost, Prophet, scikit-learn, MLflow (hosted on Databricks
+                    Free Edition, the successor of Community Edition)
 - App:              Streamlit, pdfplumber (resume PDF → text)
 - Hosting:          AWS EC2 t3.small, nginx, systemd, GitHub Actions CI/CD
 - Python deps:      managed via pyproject.toml + pip-tools
@@ -118,10 +120,15 @@ talentsignal/
 │   │   ├── talentsignal_pipeline.py  # daily: ingest → Spark → load → dbt
 │   │   └── talentsignal_bls.py       # monthly: BLS fetch → clean
 │   │
+│   ├── skills/                   # shared, Spark-free skill dictionary (Phase 5.0)
+│   │   ├── __init__.py
+│   │   └── dictionary.py         # SKILLS, patterns, find_skills(): postings AND resumes
+│   │
 │   ├── ml/
-│   │   ├── nlp_pipeline.py       # spaCy + BERTopic skill extraction + clustering
+│   │   ├── nlp_pipeline.py       # spaCy years-of-experience + embeddings + BERTopic
 │   │   ├── salary_model.py       # XGBoost regressor + MLflow logging
-│   │   └── demand_forecast.py    # Prophet time-series per skill
+│   │   ├── demand_forecast.py    # Prophet time-series per role × skill (gated)
+│   │   └── resume_features.py    # pdfplumber text → skills → model features
 │   │
 │   └── app/
 │       ├── streamlit_app.py      # entry point
@@ -136,7 +143,9 @@ talentsignal/
 │   ├── test_processing.py        # local SparkSession, no S3/Delta
 │   ├── test_dbt_ci.py            # dbt CI fixture generator (fake cursor)
 │   ├── test_dags.py              # DAGs import cleanly; task order (own CI job)
-│   └── test_ml.py
+│   ├── test_skills.py            # shared skill dictionary (no Spark)
+│   ├── test_ml.py
+│   └── fixtures/                 # e.g. a small made-up text-based resume PDF
 │
 └── .github/
     └── workflows/
@@ -395,8 +404,92 @@ swap clean_jobs / extract_skills / load_postgres to
 DatabricksRunNowOperator (+ triggerer if run deferrable).
 
 ### Phase 5 — NLP + ML models
-Build after Phase 4 is confirmed working.
-Details: TBD — ask for spec when Phase 4 is done.
+Spec approved 2026-10-07. Built around the Phase 3 findings and this data
+reality (RDS, 2026-10-07): 270 salaried postings (46–63 per role; junior 16,
+manager 10; $68K–$450K); 43% of titles state no level, but 66% of those state
+years of experience; posting-week history is one Oct 3 snapshot skewed toward
+recent weeks, 27% undated; the role-first rotation samples each role only once
+per ~25 days; 45 skills appear in ≥ 10 salaried postings.
+
+Decisions (2026-10-07):
+- D1 MLflow hosted on Databricks Free Edition (free; tracking URI
+  "databricks" + personal access token in .env). Sign-up happens at the
+  MLflow step, not before.
+- D2 VADER dropped from the stack.
+- D3 Demand = collection-week shares (not posting-week counts).
+- D4 Rotation interleaved so every role is sampled every week.
+- D5 The app's user picks their target seniority from a dropdown (not
+  inferred from the resume).
+
+5.0 Prerequisites (small changes to earlier phases):
+- Rotation: ALL_PAIRS ordered city-first (all 5 roles for a city, then the
+  next city), so least-recently-fetched ties cycle through roles.
+- src/skills/dictionary.py: SKILLS, CASE_SENSITIVE, CUSTOM_PATTERNS,
+  skill_patterns(), find_skills(text) — Spark-free, imported by
+  extract_skills.py (postings) and resume_features.py (resumes): one set of
+  patterns, identical results; a parity test guards the Spark UDF.
+- dbt: int_jobs_enriched gains seniority_effective + seniority_source
+  (title → years: 0–1 junior, 2–4 mid, 5–7 senior, 8+ staff_plus → else
+  'unknown'; the approved seniority column stays); new
+  mart_skill_salary_by_role (median with vs without each skill WITHIN a role,
+  n per side, ≥ 5 per side); mart_skill_demand switches to collection week +
+  shares, zero-filled.
+
+5.1 NLP (src/ml/nlp_pipeline.py) → RDS schema `ml`, rebuilt each run:
+- spaCy rule-based Matcher: years of experience ("5+ years", "3–5 yrs",
+  "four years") → ml.posting_nlp (years_min, years_max), a dbt source.
+  Also a review list of frequent phrases missing from the dictionary —
+  never added automatically.
+- sentence-transformers (all-MiniLM-L6-v2): title + description
+  embeddings, stored in the S3 curated bucket (for BERTopic and Phase 6
+  resume ↔ posting matching).
+- BERTopic: topics → ml.posting_topics / ml.topics for Job Insights. Not a
+  salary feature (a resume has no topic → training/serving skew).
+
+5.2 Salary model (src/ml/salary_model.py):
+- Features a resume can provide only: role, seniority_effective (incl.
+  unknown), state, remote, the common skills (≥ 10 salaried postings) as
+  yes/no, skill_count. No employer, publisher or topic.
+- Target log(salary_mid_annual); errors reported in dollars.
+- 5-fold cross-validation grouped by employer; MAE overall and per role vs
+  baselines: global median, per-role median, per role × seniority median.
+  The model is used only if it beats the per-role median, else the app
+  falls back to the baseline and says so.
+- XGBoost, shallow trees + early stopping. MLflow logs params, CV scores,
+  baselines, features and the model.
+- Missing-skill impact: what-if (same role/seniority/location + one skill),
+  only for skills with enough salaried postings in that role, shown beside
+  mart_skill_salary_by_role, worded "associated with".
+- Model + feature spec exported to the S3 curated bucket for the app.
+- Record the real MAE vs the < $9K target (expected to miss at 270 rows).
+
+5.3 Demand forecast (src/ml/demand_forecast.py):
+- Series: per role × skill, share of that role's collected postings per
+  collection week mentioning the skill, zero-filled.
+- Gate: forecast only series with ≥ 12 weekly points; otherwise output
+  insufficient_history + the observed share. Prophet: linear trend, no
+  seasonality, wide intervals; backtest vs "next week = this week" once
+  ≥ 16 weeks. The 90-day horizon only for series that pass the gate.
+
+5.4 Resume features (src/ml/resume_features.py), called by Phase 6:
+- extract_text(pdf_bytes): pdfplumber, in memory only; no text → clear error.
+- find_skills(text): the shared dictionary.
+- build_features(skills, role, seniority, state, remote): the SAME function
+  training uses (no training/serving skew). Test fixture: a small made-up
+  text-based PDF.
+
+5.5 Airflow: … load_postgres → nlp_enrich → dbt_source_freshness →
+dbt_build → train_salary_model → forecast_demand (update test_dags.py).
+
+5.6 Dependencies: spaCy + en_core_web_sm, sentence-transformers (PyTorch),
+BERTopic, XGBoost, Prophet, scikit-learn, MLflow, pdfplumber as an `ml`
+dependency group (~2–3 GB more in .venv; CI pytest a few minutes slower).
+AWS cost $0.
+
+5.7 Deliverable: DAG green end to end; CLAUDE.md records the real salary
+MAE vs baselines, forecast status, topic count and years-extraction
+coverage; unit tests (years cases, feature builder, gate, baselines, PDF
+text / no text); dbt CI fixture gains an ml.posting_nlp sample.
 
 ### Phase 6 — Streamlit app + EC2 hosting
 Build after Phase 5 is confirmed working. Hosting details (EC2, nginx,
@@ -422,9 +515,8 @@ here, e.g. containerizing the app for EC2 (infra/docker-compose.yml).
 - Page 4 — Job Insights
 
 Decisions:
-- Skill dictionary shared without Spark: move SKILLS / CASE_SENSITIVE /
-  CUSTOM_PATTERNS / skill_patterns() into a Spark-free module imported by
-  both extract_skills.py and the app (the app server has no PySpark/Java).
+- Skill dictionary shared without Spark: done in Phase 5.0 as
+  src/skills/dictionary.py (the app server has no PySpark/Java).
 - Resumes are personal data: parse in memory only; never write uploads or
   their text to disk, S3 or logs.
 - Text-based PDFs only (no OCR); a scanned/image-only PDF yields no text →
@@ -471,6 +563,10 @@ RDS_PASSWORD=
 BLS_CONTACT_EMAIL=          # sent in the User-Agent; BLS blocks anonymous scripts
 JSEARCH_MONTHLY_BUDGET=180  # Phase 4: hard cap on JSearch requests per calendar month
 JSEARCH_RESERVE_REQUESTS=20 # Phase 4: stop if RapidAPI reports this many or fewer left
+DATABRICKS_HOST=            # Phase 5: Databricks Free Edition workspace URL (hosted MLflow)
+DATABRICKS_TOKEN=           # Phase 5: personal access token for that workspace
+MLFLOW_TRACKING_URI=databricks
+MLFLOW_EXPERIMENT_NAME=     # Phase 5: e.g. /Users/<your email>/talentsignal-salary
 ```
 
 ## What to do if you're blocked

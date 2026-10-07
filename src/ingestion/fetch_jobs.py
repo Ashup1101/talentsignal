@@ -39,8 +39,10 @@ SAMPLE_LOCATIONS = [
     "Austin, TX",
     "Chicago, IL",
 ]
-# Fixed order used to break ties in the rotation.
-ALL_PAIRS = [(role, location) for role in SAMPLE_ROLES for location in SAMPLE_LOCATIONS]
+# Fixed order used to break ties in the rotation. City-first (every role for one city,
+# then the next city) so consecutive days cycle through roles: each role is sampled
+# every week, which the weekly demand series (Phase 5) need.
+ALL_PAIRS = [(role, location) for location in SAMPLE_LOCATIONS for role in SAMPLE_ROLES]
 
 PAGES_PER_PAIR = 3  # one API request per page
 DEFAULT_MONTHLY_BUDGET = 180  # of the free plan's 200 requests/month
