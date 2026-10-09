@@ -21,3 +21,7 @@ sources:
         description: One row per (job_id, skill) found by the dictionary-based skill extractor.
       - name: bls_occupations
         description: BLS OEWS national estimates, one row per detailed occupation (SOC code).
+      - name: job_sightings
+        description: >
+          One row per posting per collection, before dedup (jobs_clean keeps only
+          the latest copy). Basis for collection-week demand.

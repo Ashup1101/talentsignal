@@ -114,6 +114,13 @@ def build_fixture_sql(config: PostgresConfig) -> str:
                 f"select * from {RAW_SCHEMA}.bls_occupations where occupation_code in %s order by occupation_code",
                 (tuple(soc_codes),),
             ),
+            # Every sighting of the sampled postings, matched by content key so earlier
+            # copies (different job_id, same posting) are included too.
+            "job_sightings": (
+                f"select * from {RAW_SCHEMA}.job_sightings where dedup_key in "
+                f"(select dedup_key from {RAW_SCHEMA}.jobs_clean where job_id in %s) order by dedup_key, fetched_at",
+                (job_ids,),
+            ),
         }
 
         parts = [

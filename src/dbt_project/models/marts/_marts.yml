@@ -49,16 +49,42 @@ models:
                 values: [ok, too_few_to_report]
 
   - name: mart_skill_demand
-    description: Share of a role's postings mentioning each skill, per week.
+    description: >
+      Per collection week × role × skill: share of the role's distinct collected
+      postings mentioning the skill. Zero-filled in sampled weeks; unsampled weeks
+      have no rows (gaps, not zeros). Built from job_sightings.
     data_tests:
       - unique:
-          column_name: "posted_week || '|' || search_role || '|' || skill_name"
+          column_name: "collection_week || '|' || search_role || '|' || skill_name"
 
   - name: mart_skill_salary
     description: Median salary with vs. without each skill (association, not causation).
     columns:
       - name: skill_name
         data_tests: [unique, not_null]
+      - name: sample_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ok, too_few_to_report]
+
+  - name: mart_skill_salary_by_role
+    description: >
+      Within-role median salary with vs without each skill (association, not
+      causation); removes the role-mix effect present in mart_skill_salary.
+    data_tests:
+      - unique:
+          column_name: "role_name || '|' || skill_name"
+    columns:
+      - name: role_name
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_role')
+                field: role_name
+      - name: skill_name
+        data_tests: [not_null]
       - name: sample_status
         data_tests:
           - accepted_values:

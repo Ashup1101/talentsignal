@@ -23,7 +23,7 @@ from pyspark.sql import functions as F
 
 from src.ingestion.s3_utils import require_env
 from src.processing.clean_bls import BLS_OCCUPATIONS_PATH
-from src.processing.clean_jobs import JOBS_CLEAN_PATH
+from src.processing.clean_jobs import JOB_SIGHTINGS_PATH, JOBS_CLEAN_PATH
 from src.processing.extract_skills import JOB_SKILLS_PATH
 from src.processing.spark_utils import bucket_uri, get_spark, on_databricks
 
@@ -35,6 +35,7 @@ TABLES = {
     "jobs_clean": JOBS_CLEAN_PATH,
     "job_skills": JOB_SKILLS_PATH,
     "bls_occupations": BLS_OCCUPATIONS_PATH,
+    "job_sightings": JOB_SIGHTINGS_PATH,
 }
 POSTGRES_JDBC_PACKAGE = "org.postgresql:postgresql:42.7.13"
 

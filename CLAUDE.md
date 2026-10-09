@@ -97,7 +97,8 @@ talentsignal/
 │   │   │   ├── staging/
 │   │   │   │   ├── stg_jobs.sql
 │   │   │   │   ├── stg_skills.sql
-│   │   │   │   └── stg_bls_occupations.sql
+│   │   │   │   ├── stg_bls_occupations.sql
+│   │   │   │   └── stg_job_sightings.sql  # every collection, before dedup (Phase 5.0)
 │   │   │   ├── intermediate/
 │   │   │   │   ├── int_jobs_enriched.sql
 │   │   │   │   └── int_job_skills_joined.sql
@@ -108,7 +109,8 @@ talentsignal/
 │   │   │       ├── mart_job_trends.sql
 │   │   │       ├── mart_salary_bands.sql
 │   │   │       ├── mart_skill_demand.sql
-│   │   │       └── mart_skill_salary.sql
+│   │   │       ├── mart_skill_salary.sql
+│   │   │       └── mart_skill_salary_by_role.sql  # within-role (Phase 5.0)
 │   │   ├── seeds/
 │   │   │   └── role_soc_mapping.csv
 │   │   ├── ci/                   # dbt CI: throwaway Postgres on every PR
@@ -204,6 +206,11 @@ incremental MERGE only if raw volume makes full rebuilds slow).
   - Dedup pass 1: same job_id → latest fetch. Pass 2: same normalized
     title + employer + city → keep salary present > longer description >
     latest fetch > job_id
+  - Also writes delta/job_sightings (Phase 5.0): one row per posting per
+    collection, BEFORE dedup. JSearch issues a new job_id on every collection
+    (0 repeats in 728 sightings), so pass 2 does the real cross-collection
+    merging and keeps the latest copy — jobs_clean alone would move re-seen
+    postings into later weeks.
 - src/processing/extract_skills.py → delta/job_skills (job_id, skill, category)
   - Curated dictionary (~110 skills, 8 categories) with aliases; ambiguous
     names (R, Go, Excel, Snowflake, ...) get case-sensitive/custom patterns
@@ -433,7 +440,10 @@ Decisions (2026-10-07):
   'unknown'; the approved seniority column stays); new
   mart_skill_salary_by_role (median with vs without each skill WITHIN a role,
   n per side, ≥ 5 per side); mart_skill_demand switches to collection week +
-  shares, zero-filled.
+  shares, built from raw.job_sightings (Option B, approved 2026-10-09): per
+  collection week × role, distinct postings by dedup_key; skills via the kept
+  copy's dedup_key; zero-filled only in weeks the role was sampled (unsampled
+  weeks = gaps, not zeros), so past weeks never change.
 
 5.1 NLP (src/ml/nlp_pipeline.py) → RDS schema `ml`, rebuilt each run:
 - spaCy rule-based Matcher: years of experience ("5+ years", "3–5 yrs",
