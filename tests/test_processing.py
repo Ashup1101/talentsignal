@@ -157,6 +157,22 @@ def test_dedupe_by_content_prefers_salary_then_longer_description(spark: SparkSe
     assert kept == ["detailed", "other_city", "short_with_salary"]
 
 
+def test_sightings_keep_every_collection_that_jobs_clean_merges(spark: SparkSession, tmp_path: Path) -> None:
+    # The same job collected twice: JSearch issued a new job_id, the content is identical.
+    envelopes = [
+        _envelope([_job("oct3-id")], fetched_at="2026-10-03T15:00:00+00:00"),
+        _envelope([_job("oct7-id")], fetched_at="2026-10-07T21:00:00+00:00"),
+    ]
+    postings = _postings(spark, tmp_path, envelopes)
+
+    seen = clean_jobs.sightings(postings).collect()
+    kept = clean_jobs.dedupe_by_content(clean_jobs.dedupe_by_id(postings)).collect()
+
+    assert sorted(r.job_id for r in seen) == ["oct3-id", "oct7-id"]
+    assert len({r.dedup_key for r in seen}) == 1  # both sightings point to one posting
+    assert [r.job_id for r in kept] == ["oct7-id"]  # jobs_clean keeps only the latest copy
+
+
 # --- extract_skills -----------------------------------------------------------
 
 

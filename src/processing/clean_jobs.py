@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 RAW_JOBS_GLOB = "jobs/raw/*/*/*.json"
 JOBS_CLEAN_PATH = "delta/jobs_clean"
+# Every posting in every collection, before dedup: collection-week demand needs to
+# know what was collected each week, which jobs_clean (latest copy only) loses.
+JOB_SIGHTINGS_PATH = "delta/job_sightings"
 
 # Only the fields we keep; Spark ignores the rest of each JSON object. An explicit
 # schema keeps column types stable even when a batch has a field that is null
@@ -222,8 +225,28 @@ def dedupe_by_content(df: DataFrame) -> DataFrame:
     return df.withColumn("_rank", F.row_number().over(richest_first)).filter("_rank = 1").drop("_rank")
 
 
+def sightings(postings: DataFrame) -> DataFrame:
+    """One row per posting per collection, before any cross-collection dedup.
+
+    jobs_clean keeps only the most recent copy of a posting (JSearch issues a new
+    job_id per collection, so the content dedup does the real cross-collection
+    merging). This table remembers every collection, so a week's demand counts
+    never change after the week is over.
+
+    Args:
+        postings: Output of normalize() (not deduplicated).
+
+    Returns:
+        job_id, dedup_key, search_role, search_location, fetched_at, ingest_date;
+        unique per (job_id, fetched_at).
+    """
+    return postings.select(
+        "job_id", "dedup_key", "search_role", "search_location", "fetched_at", "ingest_date"
+    ).dropDuplicates(["job_id", "fetched_at"])
+
+
 def run(spark: SparkSession, raw_root: str, processed_root: str) -> int:
-    """Rebuild the jobs_clean Delta table from every raw JSearch file.
+    """Rebuild the jobs_clean and job_sightings Delta tables from every raw JSearch file.
 
     Args:
         spark: Active SparkSession.
@@ -249,6 +272,11 @@ def run(spark: SparkSession, raw_root: str, processed_root: str) -> int:
     out = f"{processed_root}/{JOBS_CLEAN_PATH}"
     clean.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(out)
     logger.info("Wrote %d rows to %s", n_clean, out)
+
+    seen = sightings(postings)
+    sightings_out = f"{processed_root}/{JOB_SIGHTINGS_PATH}"
+    seen.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(sightings_out)
+    logger.info("Wrote %d sightings to %s", seen.count(), sightings_out)
     postings.unpersist()
     return n_clean
 

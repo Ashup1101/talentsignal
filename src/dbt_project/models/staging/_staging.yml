@@ -6,6 +6,9 @@ models:
     columns:
       - name: job_id
         data_tests: [unique, not_null]
+      - name: dedup_key
+        description: One kept posting per content key (Phase 2 content dedup).
+        data_tests: [unique, not_null]
       - name: search_role
         description: The role searched for; must exist in the role_soc_mapping seed.
         data_tests:
@@ -20,6 +23,25 @@ models:
           - accepted_values:
               arguments:
                 values: [out_of_range, unknown_period, inverted_range]
+
+  - name: stg_job_sightings
+    description: One row per posting per collection, before dedup.
+    data_tests:
+      - unique:
+          column_name: "job_id || '|' || fetched_at"
+    columns:
+      - name: job_id
+        data_tests: [not_null]
+      - name: fetched_at
+        data_tests: [not_null]
+      - name: dedup_key
+        description: Content key; every sighting must map to the posting jobs_clean kept.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_jobs')
+                field: dedup_key
 
   - name: stg_skills
     description: One row per (job posting, skill).
