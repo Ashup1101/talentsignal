@@ -146,7 +146,8 @@ talentsignal/
 │   ├── test_dbt_ci.py            # dbt CI fixture generator (fake cursor)
 │   ├── test_dags.py              # DAGs import cleanly; task order (own CI job)
 │   ├── test_skills.py            # shared skill dictionary (no Spark)
-│   ├── test_ml.py
+│   ├── test_ml.py                # ML smoke tests (own CI job, CPU-only PyTorch)
+│   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # e.g. a small made-up text-based resume PDF
 │
 └── .github/
@@ -491,10 +492,25 @@ Decisions (2026-10-07):
 5.5 Airflow: … load_postgres → nlp_enrich → dbt_source_freshness →
 dbt_build → train_salary_model → forecast_demand (update test_dags.py).
 
-5.6 Dependencies: spaCy + en_core_web_sm, sentence-transformers (PyTorch),
-BERTopic, XGBoost, Prophet, scikit-learn, MLflow, pdfplumber as an `ml`
-dependency group (~2–3 GB more in .venv; CI pytest a few minutes slower).
-AWS cost $0.
+5.6 Dependencies (installed 2026-10-09): spaCy, sentence-transformers
+(PyTorch), BERTopic, XGBoost, Prophet, scikit-learn, mlflow-skinny (client
+only: tracking is hosted on Databricks; 11 MB vs 78 MB for full mlflow),
+pdfplumber as the `ml` dependency group. AWS cost $0.
+- requirements-ml.txt = dev + ml, one lock (seeded from requirements-dev.txt,
+  so shared pins are identical); the laptop installs it (.venv +1.5 GB).
+  requirements-dev.txt stays lean for the CI pytest job (ML tests skip there).
+- CI `ml` job: CPU-only PyTorch from download.pytorch.org/whl/cpu (196 MB vs
+  ~1.55 GB with NVIDIA libs), version read from requirements-ml.txt, then the
+  lock, then tests/test_ml.py.
+- macOS: XGBoost needs OpenMP (`brew install libomp`).
+- RULE: PyTorch and XGBoost run in SEPARATE processes. PyTorch bundles its own
+  OpenMP; loaded before multi-threaded XGBoost in one process → segfault (exit
+  139). salary_model.py must never import torch/sentence-transformers; Airflow
+  tasks are separate processes anyway. tests/conftest.py sets
+  OMP_NUM_THREADS=1 (tiny data), and a subprocess regression test guards it.
+- en_core_web_sm: not installed yet — the 5.1 years matcher only needs
+  spacy.blank("en") (like_num handles "four"); add the model only if 5.1's
+  phrase review list needs noun chunks.
 
 5.7 Deliverable: DAG green end to end; CLAUDE.md records the real salary
 MAE vs baselines, forecast status, topic count and years-extraction
