@@ -29,7 +29,8 @@ sources:
   - name: ml
     description: >
       Outputs of the Phase 5 NLP step (src/ml/nlp_pipeline.py), which reads
-      raw.jobs_clean and replaces every row, stamping one shared _loaded_at.
+      raw.jobs_clean and replaces every row of all three tables in one
+      transaction, stamping one shared _loaded_at.
     schema: ml
     config:
       loaded_at_field: _loaded_at
@@ -41,3 +42,13 @@ sources:
           One row per posting: years of experience required (the largest minimum
           among the description's mentions; NULL when none), the number of
           mentions and the phrase used as evidence.
+      - name: topics
+        description: >
+          One row per BERTopic topic: a short label, its most distinctive words
+          (comma-separated) and its size. topic_id -1 = postings in no topic.
+          Topic ids are only stable while the data is unchanged; show topics by
+          their words, never by a fixed id.
+      - name: posting_topics
+        description: >
+          One row per posting: its topic (-1 = unassigned) and HDBSCAN membership
+          strength (0–1; 0 when unassigned).

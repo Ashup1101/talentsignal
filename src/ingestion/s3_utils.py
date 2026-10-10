@@ -72,9 +72,27 @@ def upload_json(bucket: str, key: str, data: dict) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Data for s3://{bucket}/{key} is not JSON-serializable: {exc}") from exc
+    upload_bytes(bucket, key, body, "application/json")
 
+
+def upload_bytes(bucket: str, key: str, body: bytes, content_type: str) -> None:
+    """Write raw bytes (e.g. a Parquet file) to s3://bucket/key, replacing any object there.
+
+    Args:
+        bucket: Target S3 bucket name.
+        key: Object key to write.
+        body: The file's bytes.
+        content_type: MIME type stored with the object.
+
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If an AWS env var is missing.
+        S3OperationError: If the PutObject call fails.
+    """
     try:
-        _client().put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+        _client().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
     except (ClientError, BotoCoreError) as exc:
         raise S3OperationError(f"Failed to upload s3://{bucket}/{key}: {exc}") from exc
 

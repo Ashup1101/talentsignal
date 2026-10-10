@@ -100,7 +100,9 @@ talentsignal/
 │   │   │   │   ├── stg_skills.sql
 │   │   │   │   ├── stg_bls_occupations.sql
 │   │   │   │   ├── stg_job_sightings.sql  # every collection, before dedup (Phase 5.0)
-│   │   │   │   └── stg_posting_nlp.sql    # years of experience per posting (Phase 5.1a)
+│   │   │   │   ├── stg_posting_nlp.sql    # years of experience per posting (Phase 5.1a)
+│   │   │   │   ├── stg_topics.sql         # BERTopic topics; -1 = unassigned (Phase 5.1b)
+│   │   │   │   └── stg_posting_topics.sql # each posting's topic (Phase 5.1b)
 │   │   │   ├── intermediate/
 │   │   │   │   ├── int_jobs_enriched.sql
 │   │   │   │   └── int_job_skills_joined.sql
@@ -117,7 +119,7 @@ talentsignal/
 │   │   │   └── role_soc_mapping.csv
 │   │   ├── ci/                   # dbt CI: throwaway Postgres on every PR
 │   │   │   ├── make_fixtures.py  # regenerates raw_fixtures.sql from RDS (read-only)
-│   │   │   └── raw_fixtures.sql  # real 50-posting sample of raw.* + ml.posting_nlp
+│   │   │   └── raw_fixtures.sql  # real 50-posting sample of raw.* + ml.*
 │   │   └── tests/
 │   │
 │   ├── dags/                     # Airflow DAGs
@@ -129,7 +131,9 @@ talentsignal/
 │   │   └── dictionary.py         # SKILLS, patterns, find_skills(): postings AND resumes
 │   │
 │   ├── ml/
-│   │   ├── nlp_pipeline.py       # spaCy years-of-experience + embeddings + BERTopic
+│   │   ├── nlp_pipeline.py       # years of experience, boilerplate filter, writes ml.* (5.1)
+│   │   ├── embeddings.py         # chunked all-MiniLM-L6-v2 embeddings (postings AND resumes)
+│   │   ├── topics.py             # BERTopic settings + fit_topics()
 │   │   ├── salary_model.py       # XGBoost regressor + MLflow logging
 │   │   ├── demand_forecast.py    # Prophet time-series per role × skill (gated)
 │   │   └── resume_features.py    # pdfplumber text → skills → model features
@@ -149,7 +153,9 @@ talentsignal/
 │   ├── test_dags.py              # DAGs import cleanly; task order (own CI job)
 │   ├── test_skills.py            # shared skill dictionary (no Spark)
 │   ├── test_ml.py                # ML smoke tests (own CI job, CPU-only PyTorch)
-│   ├── test_nlp.py               # years-of-experience extraction (ml CI job)
+│   ├── test_nlp.py               # years, boilerplate filter, ml.* rows (ml CI job)
+│   ├── test_embeddings.py        # chunking + weighted average; real model (ml CI job)
+│   ├── test_topics.py            # BERTopic on synthetic groups (ml CI job)
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # e.g. a small made-up text-based resume PDF
 │
@@ -454,6 +460,11 @@ Decisions (2026-10-07):
   "four years") → ml.posting_nlp (years_min, years_max), a dbt source.
   Also a review list of frequent phrases missing from the dictionary —
   never added automatically.
+- sentence-transformers (all-MiniLM-L6-v2): title + description
+  embeddings, stored in the S3 curated bucket (for BERTopic and Phase 6
+  resume ↔ posting matching).
+- BERTopic: topics → ml.posting_topics / ml.topics for Job Insights. Not a
+  salary feature (a resume has no topic → training/serving skew).
 
 5.1a Years of experience — built 2026-10-09:
 - spacy.blank("en") + Matcher (LIKE_NUM, greedy LONGEST); keeps a match only
@@ -485,11 +496,56 @@ Decisions (2026-10-07):
 - Until nlp_enrich joins the daily DAG (5.5), run nlp_pipeline by hand
   after a reload; otherwise new postings lack years (the WARN test and the
   ml source freshness flag it) and untitled ones fall to 'unknown'.
-- sentence-transformers (all-MiniLM-L6-v2): title + description
-  embeddings, stored in the S3 curated bucket (for BERTopic and Phase 6
-  resume ↔ posting matching).
-- BERTopic: topics → ml.posting_topics / ml.topics for Job Insights. Not a
-  salary feature (a resume has no topic → training/serving skew).
+
+5.1b Embeddings + topics — built 2026-10-09 (D1–D3 approved that day):
+- D1 Long descriptions → chunk + average. all-MiniLM-L6-v2 reads ≤ 256
+  word-pieces (~190 words); median description 791 words, 653 of 704 (93%)
+  longer. The first 190 words held a median 13% of a posting's skills, and
+  40% of postings showed no skill there (company intro, benefits).
+- src/ml/embeddings.py (shared with the Phase 6 app): embed_texts() splits a
+  text into 150-word chunks (our text averages ~1.3 pieces/word: 150 words
+  overflow 1% of chunks, 200 words 55%), embeds each on CPU, averages them
+  weighted by words, scales to length 1. Model pinned to revision c9745ed;
+  loaded from the local cache first (otherwise ~9 Hugging Face requests per
+  load, against an anonymous rate limit).
+- Boilerplate filter (nlp_pipeline.strip_shared_sentences): sentences used
+  under 3+ different job titles are dropped before embedding (18% of
+  description words; no posting emptied). Without it, 3 of 12 topics were a
+  single employer (Capital One: 22 postings with identical legal/pay text;
+  Google, DoorDash) and others were led by employer benefits text.
+- D3 Embeddings → s3://{S3_CURATED_BUCKET}/embeddings/all-MiniLM-L6-v2/
+  postings.parquet (job_id, n_chunks, embedding float32[384]; model, revision
+  and chunking in the file metadata), overwritten each run; 1.9 MB, ≈ $0.
+- src/ml/topics.py: UMAP (30 neighbours, 10 dims, cosine, random_state 42)
+  → HDBSCAN (min cluster size 10, "leaf" selection) → c-TF-IDF (1–2 word
+  terms, English + generic job stop words, reduce_frequent_words). Keywords
+  must be used by ≥ 3 employers (no employer names). Text is cleaned the way
+  BERTopic cleans it before that vocabulary is built (a term it never counts
+  → division by zero). No min_df: BERTopic counts per TOPIC, so min_df=2
+  dropped every word unique to one topic.
+- Tuning (4 random seeds per setting): HDBSCAN's default "eom" selection gave
+  2–17 topics depending only on the seed (adjusted Rand index between seeds
+  as low as 0.02); "leaf" kept 8–9 topics (ARI mean 0.65, min 0.57), at the
+  cost of about half the postings unassigned. Min size ≥ 15 merged nearly
+  everything into one or two topics.
+- D2 Outliers stay "unassigned" (topic -1, probability 0).
+- Result (RDS, 704 postings, ~53 s): 9 topics, 332 unassigned (47%); every
+  rerun on the same data gave identical topics (704 of 704). Topics (size):
+  data engineering (109), software engineering (88), ML engineering (59),
+  clinical/health data analysis (33), AI/ML research (23), AI engineering —
+  agents, evaluation (21), analytics & dashboards (17), customer/marketing
+  insights (12), data-science strategy (10). Data scientist postings cluster
+  least: 86 of 123 unassigned.
+- ml.topics (topic_id, label, top_words, n_postings) and ml.posting_topics
+  (job_id, topic_id, topic_probability) are written in the same transaction
+  as ml.posting_nlp → dbt sources → stg_topics, stg_posting_topics (keys,
+  relationship, probability in [0, 1]). `dbt build` PASS=91.
+- Topic ids are stable only while the data is unchanged; new postings can
+  reshape topics. The app shows topics by their words, never a fixed id.
+- macOS here sleeps after 1 idle minute (pmset sleep 1): unattended runs
+  stalled ~17 min in Maintenance Sleep (pmset log) while the work takes
+  ~1.5 CPU-minutes. Manual runs: `caffeinate -i` (no help once the Mac is
+  already asleep). Same exposure for 5.5's nightly Airflow runs.
 
 5.2 Salary model (src/ml/salary_model.py):
 - Features a resume can provide only: role, seniority_effective (incl.
@@ -536,8 +592,10 @@ pdfplumber as the `ml` dependency group. AWS cost $0.
 - CI `ml` job: CPU-only PyTorch from download.pytorch.org/whl/cpu (196 MB vs
   ~1.55 GB with NVIDIA libs), version read from requirements-ml.txt, then the
   lock with --no-deps (the lock is compiled on macOS; resolving again on Linux
-  pulls XGBoost's 352 MB nvidia-nccl-cu12), then tests/test_ml.py +
-  tests/test_nlp.py.
+  pulls XGBoost's 352 MB nvidia-nccl-cu12), then tests/test_ml.py,
+  test_nlp.py, test_embeddings.py and test_topics.py. The embedding model
+  (~90 MB) is cached by actions/cache, keyed on src/ml/embeddings.py (which
+  pins its revision).
 - CI `dbt` job pulls postgres:18 from Amazon's ECR Public mirror
   (public.ecr.aws/docker/library/postgres): Docker Hub's anonymous pull
   limit on shared runner IPs failed the job twice (2026-10-09).
