@@ -31,6 +31,20 @@ dev = [
     "pyspark[sql]>=4.1,<4.2",
     "delta-spark>=4.3,<4.4",
 ]
+# Phase 5: NLP + ML. Locked together with dev in requirements-ml.txt (the laptop
+# environment and the CI `ml` job); requirements-dev.txt stays lean for CI pytest.
+# PyTorch comes in via sentence-transformers; CI installs its CPU-only build.
+ml = [
+    "spacy>=3.8,<4",
+    "sentence-transformers>=6.1,<7",
+    "bertopic>=0.17,<0.18",
+    "xgboost>=3.2,<4",
+    "prophet>=1.5,<2",
+    "scikit-learn>=1.9,<2",
+    # The client only: tracking is hosted on Databricks Free Edition.
+    "mlflow-skinny>=3.17,<4",
+    "pdfplumber>=0.11,<0.12",
+]
 
 [tool.setuptools]
 # Not an installable package; code runs from the repo root (python -m src....).

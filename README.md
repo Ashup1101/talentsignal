@@ -21,15 +21,18 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 ## Local setup
 
 Requires Python 3.11 and Java 17 (for local Spark; `brew install openjdk@17`,
-then set `JAVA_HOME`).
+then set `JAVA_HOME`). On macOS, XGBoost also needs OpenMP: `brew install libomp`.
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements-ml.txt   # everything: pipeline + dev + ML (~2.6 GB)
 # create .env with the variables under "Secrets needed" in CLAUDE.md
 pytest
 ```
+
+`requirements-dev.txt` (pipeline + dev tools, no ML) is what the CI `pytest` job
+installs; ML tests skip themselves there and run in the separate `ml` job.
 
 ## Phase 1: land raw data in S3
 
@@ -90,4 +93,5 @@ Dependencies are declared in `pyproject.toml` and pinned with pip-tools:
 ```bash
 pip-compile -o requirements.txt pyproject.toml
 pip-compile --extra dev -o requirements-dev.txt pyproject.toml
+pip-compile --extra dev --extra ml -o requirements-ml.txt pyproject.toml
 ```
