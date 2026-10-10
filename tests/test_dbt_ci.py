@@ -33,20 +33,20 @@ class _FakeCursor:
 def test_create_table_sql_copies_catalog_column_types() -> None:
     cur = _FakeCursor([("job_id", "text"), ("posted_at", "timestamp with time zone")])
 
-    sql = make_fixtures._create_table_sql(cur, "jobs_clean")
+    sql = make_fixtures._create_table_sql(cur, "raw", "jobs_clean")
 
     assert sql == "create table raw.jobs_clean (\n    job_id text,\n    posted_at timestamp with time zone\n);"
 
 
 def test_create_table_sql_fails_loudly_when_table_missing() -> None:
-    with pytest.raises(RuntimeError, match="raw.jobs_clean not found"):
-        make_fixtures._create_table_sql(_FakeCursor([]), "jobs_clean")
+    with pytest.raises(RuntimeError, match="ml.posting_nlp not found"):
+        make_fixtures._create_table_sql(_FakeCursor([]), "ml", "posting_nlp")
 
 
 def test_insert_sql_writes_every_row() -> None:
     cur = _FakeCursor([("a", "Python"), ("b", "SQL")], names=("job_id", "skill"))
 
-    sql, n = make_fixtures._insert_sql(cur, "job_skills", "select ...", ())
+    sql, n = make_fixtures._insert_sql(cur, "raw", "job_skills", "select ...", ())
 
     assert n == 2
     assert sql == "insert into raw.job_skills (job_id, skill) values\n('a', 'Python'),\n('b', 'SQL');"

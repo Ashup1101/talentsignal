@@ -87,18 +87,20 @@ talentsignal/
 │   │   ├── clean_jobs.py         # flatten JSON, deduplicate, normalize
 │   │   ├── clean_bls.py          # BLS raw snapshots → occupations table
 │   │   ├── extract_skills.py     # PySpark UDF for skill extraction
-│   │   └── load_postgres.py      # Delta tables → RDS raw schema (JDBC)
+│   │   ├── load_postgres.py      # Delta tables → RDS raw schema (JDBC)
+│   │   └── postgres.py           # PostgresConfig (RDS from env vars), Spark-free
 │   │
 │   ├── dbt_project/              # full dbt project lives here
 │   │   ├── dbt_project.yml
 │   │   ├── profiles.yml.example
 │   │   ├── models/
-│   │   │   ├── sources.yml       # raw.* tables loaded by load_postgres.py
+│   │   │   ├── sources.yml       # raw.* (load_postgres.py) + ml.* (nlp_pipeline.py)
 │   │   │   ├── staging/
 │   │   │   │   ├── stg_jobs.sql
 │   │   │   │   ├── stg_skills.sql
 │   │   │   │   ├── stg_bls_occupations.sql
-│   │   │   │   └── stg_job_sightings.sql  # every collection, before dedup (Phase 5.0)
+│   │   │   │   ├── stg_job_sightings.sql  # every collection, before dedup (Phase 5.0)
+│   │   │   │   └── stg_posting_nlp.sql    # years of experience per posting (Phase 5.1a)
 │   │   │   ├── intermediate/
 │   │   │   │   ├── int_jobs_enriched.sql
 │   │   │   │   └── int_job_skills_joined.sql
@@ -115,7 +117,7 @@ talentsignal/
 │   │   │   └── role_soc_mapping.csv
 │   │   ├── ci/                   # dbt CI: throwaway Postgres on every PR
 │   │   │   ├── make_fixtures.py  # regenerates raw_fixtures.sql from RDS (read-only)
-│   │   │   └── raw_fixtures.sql  # real 50-posting sample of raw.*
+│   │   │   └── raw_fixtures.sql  # real 50-posting sample of raw.* + ml.posting_nlp
 │   │   └── tests/
 │   │
 │   ├── dags/                     # Airflow DAGs
@@ -147,6 +149,7 @@ talentsignal/
 │   ├── test_dags.py              # DAGs import cleanly; task order (own CI job)
 │   ├── test_skills.py            # shared skill dictionary (no Spark)
 │   ├── test_ml.py                # ML smoke tests (own CI job, CPU-only PyTorch)
+│   ├── test_nlp.py               # years-of-experience extraction (ml CI job)
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # e.g. a small made-up text-based resume PDF
 │
@@ -437,8 +440,8 @@ Decisions (2026-10-07):
   extract_skills.py (postings) and resume_features.py (resumes): one set of
   patterns, identical results; a parity test guards the Spark UDF.
 - dbt: int_jobs_enriched gains seniority_effective + seniority_source
-  (title → years: 0–1 junior, 2–4 mid, 5–7 senior, 8+ staff_plus → else
-  'unknown'; the approved seniority column stays); new
+  (title → years → else 'unknown'; years thresholds revised in 5.1a, see
+  there; the approved seniority column stays); new
   mart_skill_salary_by_role (median with vs without each skill WITHIN a role,
   n per side, ≥ 5 per side); mart_skill_demand switches to collection week +
   shares, built from raw.job_sightings (Option B, approved 2026-10-09): per
@@ -451,6 +454,37 @@ Decisions (2026-10-07):
   "four years") → ml.posting_nlp (years_min, years_max), a dbt source.
   Also a review list of frequent phrases missing from the dictionary —
   never added automatically.
+
+5.1a Years of experience — built 2026-10-09:
+- spacy.blank("en") + Matcher (LIKE_NUM, greedy LONGEST); keeps a match only
+  if it reads like a requirement (+, range, "at least/minimum/over", or an
+  "experience" word within 8 tokens); drops "… ago", "… old", > 30 years.
+- One posting → the mention with the LARGEST minimum ("5+ years overall,
+  2+ with Spark" → 5). Known limitation: postings listing education-tiered
+  alternatives ("diploma + 5 yrs or bachelor's + 3") are overstated —
+  39 of 521 postings with years (7%). Kept as is (decided 2026-10-09).
+- python -m src.ml.nlp_pipeline: reads raw.jobs_clean (psycopg2, no Spark),
+  writes ml.posting_nlp (job_id, years_min, years_max, years_mentions,
+  years_evidence, _loaded_at) in ONE transaction (create if missing →
+  truncate → insert → count check); truncate, not drop, keeps dbt views.
+  PostgresConfig moved to src/processing/postgres.py (Spark-free).
+- Result (RDS, 704 postings, ~4.5 s): 521 (74%) state years; untitled
+  postings 206 of 302 (68%).
+- Thresholds (decided 2026-10-09, dbt vars seniority_min_years_*):
+  junior < 2, mid 2–3, senior 4–6, staff_plus 7+. Agreement with titled
+  postings' title level: 62% (the original 0–1 / 2–4 / 5–7 / 8+: 57%).
+- dbt: source ml.posting_nlp (freshness warn > 2 days) → stg_posting_nlp
+  (experience_years_min/max, …) → int_jobs_enriched / fact_job_postings
+  gain seniority_effective, seniority_source (title / years / none),
+  experience_years_min/max. Tests: accepted values, years min ≤ max, and a
+  WARN-level check that every posting has an ml.posting_nlp row.
+- seniority_source on RDS: title 402 (57%), years 206 (29%), none 96 (14%)
+  — "no level" 43% → 14%. seniority_effective (total / salaried): intern
+  6/0, junior 48/22, mid 111/50, senior 241/97, staff_plus 163/57,
+  manager 39/10, unknown 96/34. `dbt build` PASS=81.
+- Until nlp_enrich joins the daily DAG (5.5), run nlp_pipeline by hand
+  after a reload; otherwise new postings lack years (the WARN test and the
+  ml source freshness flag it) and untitled ones fall to 'unknown'.
 - sentence-transformers (all-MiniLM-L6-v2): title + description
   embeddings, stored in the S3 curated bucket (for BERTopic and Phase 6
   resume ↔ posting matching).
@@ -501,7 +535,12 @@ pdfplumber as the `ml` dependency group. AWS cost $0.
   requirements-dev.txt stays lean for the CI pytest job (ML tests skip there).
 - CI `ml` job: CPU-only PyTorch from download.pytorch.org/whl/cpu (196 MB vs
   ~1.55 GB with NVIDIA libs), version read from requirements-ml.txt, then the
-  lock, then tests/test_ml.py.
+  lock with --no-deps (the lock is compiled on macOS; resolving again on Linux
+  pulls XGBoost's 352 MB nvidia-nccl-cu12), then tests/test_ml.py +
+  tests/test_nlp.py.
+- CI `dbt` job pulls postgres:18 from Amazon's ECR Public mirror
+  (public.ecr.aws/docker/library/postgres): Docker Hub's anonymous pull
+  limit on shared runner IPs failed the job twice (2026-10-09).
 - macOS: XGBoost needs OpenMP (`brew install libomp`).
 - RULE: PyTorch and XGBoost run in SEPARATE processes. PyTorch bundles its own
   OpenMP; loaded before multi-threaded XGBoost in one process → segfault (exit

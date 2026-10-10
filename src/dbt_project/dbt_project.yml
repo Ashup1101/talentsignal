@@ -15,6 +15,11 @@ clean-targets: ["target", "dbt_packages"]
 vars:
   # Salary statistics from fewer postings than this are reported as "too few".
   min_salary_sample: 5
+  # seniority_effective for titles with no level word, from years of experience
+  # (ml.posting_nlp): < 2 junior, 2–3 mid, 4–6 senior, 7+ staff_plus.
+  seniority_min_years_mid: 2
+  seniority_min_years_senior: 4
+  seniority_min_years_staff_plus: 7
 
 # Schemas are named <target schema>_<folder schema>, e.g. analytics_staging.
 models:

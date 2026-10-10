@@ -25,3 +25,19 @@ sources:
         description: >
           One row per posting per collection, before dedup (jobs_clean keeps only
           the latest copy). Basis for collection-week demand.
+
+  - name: ml
+    description: >
+      Outputs of the Phase 5 NLP step (src/ml/nlp_pipeline.py), which reads
+      raw.jobs_clean and replaces every row, stamping one shared _loaded_at.
+    schema: ml
+    config:
+      loaded_at_field: _loaded_at
+      freshness:
+        warn_after: {count: 2, period: day}
+    tables:
+      - name: posting_nlp
+        description: >
+          One row per posting: years of experience required (the largest minimum
+          among the description's mentions; NULL when none), the number of
+          mentions and the phrase used as evidence.
