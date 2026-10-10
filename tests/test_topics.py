@@ -56,8 +56,9 @@ def test_every_topic_is_one_group_and_every_group_is_found(fitted: tuple[topics.
         groups = set(truth[assigned == topic.topic_id])
         assert len(groups) == 1, f"topic {topic.topic_id} mixes groups {groups}"
         found |= groups
-        # The keywords come from that group's vocabulary.
-        assert topic.top_words[0] in _VOCAB[groups.pop()].split()
+        # The top keyword (a word or two-word phrase) comes from that group's vocabulary.
+        # Identical synthetic docs tie words and phrases, and platforms break ties differently.
+        assert set(topic.top_words[0].split()) <= set(_VOCAB[groups.pop()].split())
     assert found == {0, 1, 2}
 
 
