@@ -47,8 +47,10 @@ jobs:
     services:
       # Throwaway database: exists only for this job run, then is deleted.
       # Same major version as RDS. ci/ci is not a secret — it never leaves the runner.
+      # The official image via Amazon's ECR Public mirror: Docker Hub rate-limits
+      # anonymous pulls per IP, and GitHub's shared runner IPs hit that limit.
       postgres:
-        image: postgres:18
+        image: public.ecr.aws/docker/library/postgres:18
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
@@ -136,8 +138,11 @@ jobs:
       - name: Install CPU-only PyTorch
         run: pip install "torch==$(grep -E '^torch==' requirements-ml.txt | cut -d= -f3)" --index-url https://download.pytorch.org/whl/cpu
 
+      # --no-deps: install exactly the lock. It was compiled on macOS, so letting pip
+      # resolve again on Linux pulls Linux-only extras such as XGBoost's 352 MB
+      # nvidia-nccl-cu12 (GPU-only; CI has no GPU).
       - name: Install dependencies
-        run: pip install -r requirements-ml.txt
+        run: pip install --no-deps -r requirements-ml.txt
 
       - name: ML tests
-        run: pytest -q tests/test_ml.py
+        run: pytest -q tests/test_ml.py tests/test_nlp.py

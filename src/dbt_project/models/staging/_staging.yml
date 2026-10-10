@@ -5,7 +5,18 @@ models:
     description: One row per unique job posting (raw.jobs_clean with clearer column names).
     columns:
       - name: job_id
-        data_tests: [unique, not_null]
+        data_tests:
+          - unique
+          - not_null
+          # Warn only: a posting without an ml.posting_nlp row means the NLP step
+          # hasn't run since the last reload (it joins the daily DAG in Phase 5.5);
+          # such postings fall back to seniority_effective 'unknown' unless titled.
+          - relationships:
+              arguments:
+                to: ref('stg_posting_nlp')
+                field: job_id
+              config:
+                severity: warn
       - name: dedup_key
         description: One kept posting per content key (Phase 2 content dedup).
         data_tests: [unique, not_null]
@@ -63,6 +74,12 @@ models:
           - accepted_values:
               arguments:
                 values: [language, data_engineering, database, cloud, devops, ml_ai, analytics_bi, web]
+
+  - name: stg_posting_nlp
+    description: Years of experience per posting (ml.posting_nlp, from src/ml/nlp_pipeline.py).
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
 
   - name: stg_bls_occupations
     description: One row per BLS detailed occupation.

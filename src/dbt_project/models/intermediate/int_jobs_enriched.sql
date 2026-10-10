@@ -1,7 +1,12 @@
 -- One row per posting, plus derived fields: seniority (rule-based, from the
--- title), skill_count, posting date/week in UTC and has_salary.
+-- title), seniority_effective (title, else years of experience), skill_count,
+-- posting date/week in UTC and has_salary.
 with jobs as (
     select * from {{ ref('stg_jobs') }}
+),
+
+nlp as (
+    select * from {{ ref('stg_posting_nlp') }}
 ),
 
 skill_counts as (
@@ -54,6 +59,23 @@ select
     -- whether the level was actually stated.
     coalesce(classified.seniority_rule, 'mid') as seniority,
     classified.seniority_rule is not null as seniority_from_title,
+    -- The title's level when it states one; otherwise the years of experience
+    -- the description asks for; otherwise 'unknown' (never a guessed 'mid').
+    case
+        when classified.seniority_rule is not null then classified.seniority_rule
+        when nlp.experience_years_min >= {{ var('seniority_min_years_staff_plus') }} then 'staff_plus'
+        when nlp.experience_years_min >= {{ var('seniority_min_years_senior') }} then 'senior'
+        when nlp.experience_years_min >= {{ var('seniority_min_years_mid') }} then 'mid'
+        when nlp.experience_years_min is not null then 'junior'
+        else 'unknown'
+    end as seniority_effective,
+    case
+        when classified.seniority_rule is not null then 'title'
+        when nlp.experience_years_min is not null then 'years'
+        else 'none'
+    end as seniority_source,
+    nlp.experience_years_min,
+    nlp.experience_years_max,
     classified.salary_min_annual,
     classified.salary_max_annual,
     classified.salary_mid_annual,
@@ -64,3 +86,4 @@ select
     classified.fetched_at
 from classified
 left join skill_counts on skill_counts.job_id = classified.job_id
+left join nlp on nlp.job_id = classified.job_id

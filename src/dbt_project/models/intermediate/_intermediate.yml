@@ -17,6 +17,23 @@ models:
           - accepted_values:
               arguments:
                 values: [intern, junior, mid, senior, staff_plus, manager]
+      - name: seniority_effective
+        description: >
+          The title's level when stated; else from years of experience
+          (< 2 junior, 2–3 mid, 4–6 senior, 7+ staff_plus); else 'unknown'.
+          Used by the salary model (a resume user picks their level).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [intern, junior, mid, senior, staff_plus, manager, unknown]
+      - name: seniority_source
+        description: Where seniority_effective came from.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [title, years, none]
 
   - name: int_job_skills_joined
     description: One row per (posting, skill) with the posting attributes skill marts group by.
