@@ -144,5 +144,14 @@ jobs:
       - name: Install dependencies
         run: pip install --no-deps -r requirements-ml.txt
 
+      # The pinned embedding model (~90 MB) is downloaded from Hugging Face once, then
+      # restored from this cache, so runs don't hit the Hub's anonymous rate limit.
+      # embeddings.py pins the model revision, so it is the right cache key.
+      - name: Cache embedding model
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('src/ml/embeddings.py') }}
+
       - name: ML tests
-        run: pytest -q tests/test_ml.py tests/test_nlp.py
+        run: pytest -q tests/test_ml.py tests/test_nlp.py tests/test_embeddings.py tests/test_topics.py

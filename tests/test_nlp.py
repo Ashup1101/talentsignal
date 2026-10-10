@@ -1,4 +1,4 @@
-"""Tests for src/ml/nlp_pipeline.py (years-of-experience extraction).
+"""Tests for src/ml/nlp_pipeline.py (years of experience, boilerplate filter, output rows).
 
 Skipped where spaCy isn't installed (the CI pytest job); runs in the `ml` job.
 """
@@ -76,3 +76,70 @@ def test_posting_rows_shape_and_largest_minimum() -> None:
     )
 
     assert rows == [("a", 5.0, None, 2, "5+ years", loaded_at), ("b", None, None, 0, None, loaded_at)]
+
+
+def test_strip_shared_sentences_removes_text_shared_across_titles() -> None:
+    legal = "We are an equal opportunity employer."
+    titles = ["data engineer", "data analyst", "ml engineer", "data engineer"]
+    descriptions = [
+        f"Build Spark pipelines. {legal}",
+        f"Build dashboards in Tableau. {legal}",
+        f"Train ranking models. {legal}",
+        "Build Spark pipelines. Same job, another city.",
+    ]
+
+    stripped = nlp_pipeline.strip_shared_sentences(titles, descriptions)
+
+    # The legal line appears under 3 titles → removed; "Build Spark pipelines." appears
+    # twice but under one title (the same job in two cities) → kept.
+    assert stripped == [
+        "Build Spark pipelines.",
+        "Build dashboards in Tableau.",
+        "Train ranking models.",
+        "Build Spark pipelines.\nSame job, another city.",
+    ]
+
+
+def test_strip_shared_sentences_keeps_a_description_it_would_empty() -> None:
+    shared = "Join us."
+    stripped = nlp_pipeline.strip_shared_sentences(["a", "b", "c"], [shared, shared, shared])
+
+    assert stripped == [shared, shared, shared]
+
+
+def test_embeddings_parquet_round_trip() -> None:
+    import io
+
+    import numpy as np
+    import pyarrow.parquet as pq
+
+    vectors = np.array([[0.6, 0.8], [1.0, 0.0]], dtype=np.float32)
+
+    table = pq.read_table(io.BytesIO(nlp_pipeline.embeddings_parquet(["a", "b"], vectors, [3, 1])))
+
+    assert table.column("job_id").to_pylist() == ["a", "b"]
+    assert table.column("n_chunks").to_pylist() == [3, 1]
+    np.testing.assert_allclose(np.array(table.column("embedding").to_pylist()), vectors)
+    assert table.schema.metadata[b"model"] == b"sentence-transformers/all-MiniLM-L6-v2"
+
+
+def test_topic_rows_and_posting_topic_rows() -> None:
+    from datetime import datetime, timezone
+
+    from src.ml.topics import Topic, TopicResult
+
+    loaded_at = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    result = TopicResult(
+        topics=[Topic(-1, "unassigned", (), 1), Topic(0, "spark, pipelines", ("spark", "pipelines"), 1)],
+        assignments=[0, -1],
+        probabilities=[0.9, 0.0],
+    )
+
+    assert nlp_pipeline.topic_rows(result, loaded_at) == [
+        (-1, "unassigned", None, 1, loaded_at),
+        (0, "spark, pipelines", "spark, pipelines", 1, loaded_at),
+    ]
+    assert nlp_pipeline.posting_topic_rows(["a", "b"], result, loaded_at) == [
+        ("a", 0, 0.9, loaded_at),
+        ("b", -1, 0.0, loaded_at),
+    ]
