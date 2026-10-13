@@ -81,6 +81,27 @@ models:
       - name: job_id
         data_tests: [unique, not_null]
 
+  - name: stg_topics
+    description: BERTopic topics (ml.topics); topic_id -1 = unassigned postings.
+    columns:
+      - name: topic_id
+        data_tests: [unique, not_null]
+      - name: topic_label
+        data_tests: [not_null]
+
+  - name: stg_posting_topics
+    description: Each posting's topic (ml.posting_topics).
+    columns:
+      - name: job_id
+        data_tests: [unique, not_null]
+      - name: topic_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_topics')
+                field: topic_id
+
   - name: stg_bls_occupations
     description: One row per BLS detailed occupation.
     columns:

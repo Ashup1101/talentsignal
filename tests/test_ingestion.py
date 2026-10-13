@@ -49,6 +49,15 @@ def test_upload_json_writes_serialized_body(s3_stub: Stubber) -> None:
     s3_utils.upload_json(BUCKET, "jobs/raw/x.json", data)
 
 
+def test_upload_bytes_sends_body_and_content_type(s3_stub: Stubber) -> None:
+    s3_stub.add_response(
+        "put_object",
+        {},
+        expected_params={"Bucket": BUCKET, "Key": "e/p.parquet", "Body": b"PAR1", "ContentType": "application/vnd.apache.parquet"},
+    )
+    s3_utils.upload_bytes(BUCKET, "e/p.parquet", b"PAR1", "application/vnd.apache.parquet")
+
+
 def test_upload_json_rejects_unserializable_data(s3_stub: Stubber) -> None:
     with pytest.raises(ValueError, match="not JSON-serializable"):
         s3_utils.upload_json(BUCKET, "k.json", {"bad": object()})

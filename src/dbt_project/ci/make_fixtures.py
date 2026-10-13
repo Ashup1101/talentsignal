@@ -32,7 +32,7 @@ DESCRIPTION_CHARS = 200
 # Written by src/ml/nlp_pipeline.py (not imported here: it needs spaCy, which the
 # CI pytest job doesn't install). Copied as computed from the full descriptions.
 ML_SCHEMA = "ml"
-ML_TABLES = ("posting_nlp",)
+ML_TABLES = ("posting_nlp", "topics", "posting_topics")
 
 _SAMPLE_SQL = f"""
     with labelled as (
@@ -128,6 +128,12 @@ def build_fixture_sql(config: PostgresConfig) -> str:
                 (job_ids,),
             ),
             "posting_nlp": (f"select * from {ML_SCHEMA}.posting_nlp where job_id in %s order by job_id", (job_ids,)),
+            # Every topic (a handful of rows), so each sampled posting's topic exists.
+            "topics": (f"select * from {ML_SCHEMA}.topics where %s order by topic_id", (True,)),
+            "posting_topics": (
+                f"select * from {ML_SCHEMA}.posting_topics where job_id in %s order by job_id",
+                (job_ids,),
+            ),
         }
 
         parts = [
