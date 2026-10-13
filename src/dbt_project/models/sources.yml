@@ -52,3 +52,8 @@ sources:
         description: >
           One row per posting: its topic (-1 = unassigned) and HDBSCAN membership
           strength (0–1; 0 when unassigned).
+      - name: skill_demand_forecast
+        description: >
+          Written by src/ml/demand_forecast.py (not the NLP step). Per role × skill:
+          'insufficient_history' (fewer than 12 weekly points) with the latest
+          observed share, or 13 weekly Prophet forecasts with 95% intervals.
