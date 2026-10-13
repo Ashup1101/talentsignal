@@ -567,7 +567,16 @@ Decisions (2026-10-07):
 - Model + feature spec exported to the S3 curated bucket for the app.
 - Record the real MAE vs the < $9K target (expected to miss at 270 rows).
 
-5.2 Built 2026-10-10 — MLflow run + S3 export PENDING Databricks credentials:
+5.2 Status: COMPLETE (2026-10-13). Built 2026-10-10; real run 2026-10-13:
+- MLflow run da52fa5124ef4a42a1e4962bf58ab418 (Databricks Free Edition,
+  experiment /Users/<your Databricks email>/talentsignal-salary): FINISHED;
+  13 params, 24 metrics (overall + per-role MAE for the model and the three
+  baselines), tag use_model=true, artifacts feature_spec.json +
+  model_card.json; the model is an MLflow 3 LoggedModel linked to the run.
+- S3 export verified by reading it back: models/salary/model.json (161 KB)
+  loads and predicts (e.g. senior data engineer, NY, Python/SQL/Spark/AWS/
+  Airflow → $162,700); feature_spec.json (6 KB) carries the same run id,
+  use_model=true, 152 trees, 64 features.
 - Data (dbt marts): 270 salaried postings, 207 employers (most: Meta 9),
   5 states + 27 with no location, 22 remote; $69K–$450K, median $162K.
 - src/ml/features.py (shared with 5.4 / the app, no PyTorch): Profile →
