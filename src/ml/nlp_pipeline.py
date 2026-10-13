@@ -39,7 +39,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import spacy
 from dotenv import load_dotenv
-from psycopg2.extras import execute_values
 from spacy.language import Language
 from spacy.matcher import Matcher
 from spacy.tokens import Doc, Span
@@ -47,7 +46,7 @@ from spacy.tokens import Doc, Span
 from src.ingestion.s3_utils import require_env, upload_bytes
 from src.ml.embeddings import CHUNK_WORDS, MODEL_NAME, MODEL_REVISION, chunk_text, embed_texts
 from src.ml.topics import TopicResult, fit_topics
-from src.processing.postgres import PostgresConfig
+from src.processing.postgres import PostgresConfig, replace_tables
 
 logger = logging.getLogger(__name__)
 
@@ -351,29 +350,6 @@ def posting_topic_rows(job_ids: list[str], result: TopicResult, loaded_at: datet
     ]
 
 
-def _replace_tables(config: PostgresConfig, rows_by_table: dict[str, list[tuple]]) -> None:
-    # One transaction: readers see the previous complete tables until commit, and a
-    # failure rolls back every table. Truncate (not drop) keeps dependent dbt views.
-    with closing(config.connect()) as conn, conn, conn.cursor() as cur:
-        cur.execute(f"create schema if not exists {ML_SCHEMA}")
-        for table, rows in rows_by_table.items():
-            ddl, columns = _TABLES[table]
-            qualified = f"{ML_SCHEMA}.{table}"
-            cur.execute(
-                f"create table if not exists {qualified} "
-                f"({ddl}, _loaded_at timestamp with time zone not null)"
-            )
-            cur.execute(f"truncate {qualified}")
-            execute_values(
-                cur, f"insert into {qualified} ({', '.join(columns)}, _loaded_at) values %s", rows, page_size=500
-            )
-            cur.execute(f"select count(*) from {qualified}")
-            written = cur.fetchone()[0]
-            if written != len(rows):
-                raise RuntimeError(f"{qualified} has {written} rows; expected {len(rows)}")
-            logger.info("%s: %d rows", qualified, written)
-
-
 def run(config: PostgresConfig, curated_bucket: str) -> dict[str, int]:
     """Rebuild the ml.* tables and the posting embeddings from raw.jobs_clean.
 
@@ -432,7 +408,7 @@ def run(config: PostgresConfig, curated_bucket: str) -> dict[str, int]:
         "topics": topic_rows(result, loaded_at),
         "posting_topics": posting_topic_rows(job_ids, result, loaded_at),
     }
-    _replace_tables(config, rows_by_table)
+    replace_tables(config, ML_SCHEMA, {t: (*_TABLES[t], rows) for t, rows in rows_by_table.items()})
     return {table: len(rows) for table, rows in rows_by_table.items()}
 
 

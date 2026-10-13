@@ -29,10 +29,10 @@ SEED = HERE.parent / "seeds" / "role_soc_mapping.csv"
 # Postings per search role, by kind, so every model path gets exercised.
 SAMPLE_PER_ROLE = {"with_salary": 4, "no_location": 2, "other": 4}
 DESCRIPTION_CHARS = 200
-# Written by src/ml/nlp_pipeline.py (not imported here: it needs spaCy, which the
-# CI pytest job doesn't install). Copied as computed from the full descriptions.
+# Written by src/ml/nlp_pipeline.py and demand_forecast.py (not imported here: they
+# need ML libraries the CI pytest job doesn't install). Copied as computed.
 ML_SCHEMA = "ml"
-ML_TABLES = ("posting_nlp", "topics", "posting_topics")
+ML_TABLES = ("posting_nlp", "topics", "posting_topics", "skill_demand_forecast")
 
 _SAMPLE_SQL = f"""
     with labelled as (
@@ -132,6 +132,13 @@ def build_fixture_sql(config: PostgresConfig) -> str:
             "topics": (f"select * from {ML_SCHEMA}.topics where %s order by topic_id", (True,)),
             "posting_topics": (
                 f"select * from {ML_SCHEMA}.posting_topics where job_id in %s order by job_id",
+                (job_ids,),
+            ),
+            # Forecast rows for the skills the sampled postings mention.
+            "skill_demand_forecast": (
+                f"select * from {ML_SCHEMA}.skill_demand_forecast where skill_name in "
+                f"(select skill from {RAW_SCHEMA}.job_skills where job_id in %s)"
+                " order by search_role, skill_name, forecast_week",
                 (job_ids,),
             ),
         }

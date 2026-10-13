@@ -102,6 +102,23 @@ models:
                 to: ref('stg_topics')
                 field: topic_id
 
+  - name: stg_skill_demand_forecast
+    description: Skill-demand forecast or the gate's verdict per role × skill (ml.skill_demand_forecast).
+    data_tests:
+      - unique:
+          column_name: "search_role || '|' || skill_name || '|' || coalesce(forecast_week::text, '-')"
+    columns:
+      - name: search_role
+        data_tests: [not_null]
+      - name: skill_name
+        data_tests: [not_null]
+      - name: forecast_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [forecast, insufficient_history]
+
   - name: stg_bls_occupations
     description: One row per BLS detailed occupation.
     columns:
