@@ -124,7 +124,7 @@ talentsignal/
 │   │   └── tests/
 │   │
 │   ├── dags/                     # Airflow DAGs
-│   │   ├── talentsignal_pipeline.py  # daily: ingest → Spark → load → dbt
+│   │   ├── talentsignal_pipeline.py  # daily: ingest → Spark → load → NLP → dbt → ML
 │   │   └── talentsignal_bls.py       # monthly: BLS fetch → clean
 │   │
 │   ├── skills/                   # shared, Spark-free skill dictionary (Phase 5.0)
@@ -353,7 +353,7 @@ pipeline venv — the same commands that run by hand:
   cron "0 22 * * *", catchup=False,
   max_active_runs=1, retries=1 (fetch_jobs: 2, 10 min apart):
   fetch_jobs → clean_jobs → extract_skills → load_postgres →
-  dbt_source_freshness → dbt_build   (retrain_models added in Phase 5)
+  dbt_source_freshness → dbt_build   (Phase 5.5 adds the NLP + ML tasks)
 - talentsignal_bls — monthly: fetch_bls → clean_bls (BLS publishes yearly;
   the daily load_postgres picks up the latest delta/bls_occupations).
 
@@ -499,9 +499,10 @@ Decisions (2026-10-07):
   — "no level" 43% → 14%. seniority_effective (total / salaried): intern
   6/0, junior 48/22, mid 111/50, senior 241/97, staff_plus 163/57,
   manager 39/10, unknown 96/34. `dbt build` PASS=81.
-- Until nlp_enrich joins the daily DAG (5.5), run nlp_pipeline by hand
-  after a reload; otherwise new postings lack years (the WARN test and the
-  ml source freshness flag it) and untitled ones fall to 'unknown'.
+- Since 5.5 nlp_enrich runs in the daily DAG right after load_postgres. A
+  reload by hand still needs `python -m src.ml.nlp_pipeline` afterwards;
+  otherwise new postings lack years (the WARN test and the ml source
+  freshness flag it) and untitled ones fall to 'unknown'.
 
 5.1b Embeddings + topics — built 2026-10-09 (D1–D3 approved that day):
 - D1 Long descriptions → chunk + average. all-MiniLM-L6-v2 reads ≤ 256
@@ -673,6 +674,31 @@ Decisions (2026-10-07):
 
 5.5 Airflow: … load_postgres → nlp_enrich → dbt_source_freshness →
 dbt_build → train_salary_model → forecast_demand (update test_dags.py).
+
+5.5 Status: BUILT (2026-10-13) — the user's "5.5" (nlp_enrich + forecast_demand) and
+"5.6" (salary model after dbt) in one change.
+- talentsignal_pipeline (9 tasks): fetch_jobs → clean_jobs → extract_skills
+  → load_postgres → nlp_enrich → dbt_source_freshness → dbt_build →
+  {train_salary_model, forecast_demand}. The two models branch off
+  dbt_build instead of chaining (spec sketch): both read dbt marts but not
+  each other, so a failed salary run (e.g. Databricks down) doesn't block
+  the forecast; LocalExecutor + SQLite runs one task at a time anyway.
+- One process per task (BashOperator → .venv/bin/python -m …) keeps
+  PyTorch (nlp_enrich) and XGBoost (train_salary_model) apart (5.6 rule).
+- Timeouts: nlp_enrich 45 min (~1 min awake), train_salary_model 30 min,
+  forecast_demand 45 min (seconds now; ~20 min once ~390 series forecast +
+  backtest). Retries: the DAG default (1 after 5 min).
+- tests/test_dags.py: chain + branch structure (both models depend only on
+  dbt_build, nothing after them) and each ML task's exact command; 11 pass.
+- Verified with `airflow tasks test` (run_local.sh environment, no
+  scheduler, no JSearch): nlp_enrich 57 s (same outputs as by hand);
+  train_salary_model logged MLflow run b1b028edc59847da9da04d914828a7ef and
+  re-exported the same model (the S3 card now names this run);
+  forecast_demand wrote 390 insufficient_history rows.
+- Not yet run: a full scheduled DAG run with the ML tasks (5.7 deliverable).
+  The DAG is still PAUSED. Mac sleep (pmset sleep 1) stalls tasks mid-run;
+  an option is to start Airflow under `caffeinate -i` in run_local.sh
+  (keeps the Mac awake while Airflow runs) — not done, the user's call.
 
 5.6 Dependencies (installed 2026-10-09): spaCy, sentence-transformers
 (PyTorch), BERTopic, XGBoost, Prophet, scikit-learn, mlflow-skinny (client
