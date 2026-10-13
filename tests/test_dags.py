@@ -35,14 +35,17 @@ from airflow.dag_processing.dagbag import DagBag  # noqa: E402
 REPO = Path(__file__).resolve().parents[1]
 DAGS_DIR = REPO / "src" / "dags"
 
-PIPELINE_ORDER = [
+PIPELINE_CHAIN = [
     "fetch_jobs",
     "clean_jobs",
     "extract_skills",
     "load_postgres",
+    "nlp_enrich",  # before dbt: dbt reads its ml.* tables
     "dbt_source_freshness",
     "dbt_build",
 ]
+# Both models read dbt marts but not each other: a failed salary run mustn't block the forecast.
+PIPELINE_AFTER_DBT_BUILD = {"train_salary_model", "forecast_demand"}
 BLS_ORDER = ["fetch_bls", "clean_bls"]
 
 
@@ -60,16 +63,24 @@ def test_exactly_the_expected_dags_exist(dagbag: DagBag) -> None:
 
 
 @pytest.mark.parametrize(
-    ("dag_id", "order"),
-    [("talentsignal_pipeline", PIPELINE_ORDER), ("talentsignal_bls", BLS_ORDER)],
+    ("dag_id", "chain", "branches"),
+    [
+        ("talentsignal_pipeline", PIPELINE_CHAIN, PIPELINE_AFTER_DBT_BUILD),
+        ("talentsignal_bls", BLS_ORDER, set()),
+    ],
 )
-def test_tasks_form_one_chain_in_the_specified_order(dagbag: DagBag, dag_id: str, order: list[str]) -> None:
+def test_tasks_run_in_the_specified_order(dagbag: DagBag, dag_id: str, chain: list[str], branches: set[str]) -> None:
     dag = dagbag.dags[dag_id]
 
-    assert sorted(dag.task_ids) == sorted(order)
-    assert dag.get_task(order[0]).upstream_task_ids == set()
-    for upstream, downstream in zip(order, order[1:]):
+    assert sorted(dag.task_ids) == sorted([*chain, *branches])
+    assert dag.get_task(chain[0]).upstream_task_ids == set()
+    for upstream, downstream in zip(chain, chain[1:]):
         assert dag.get_task(downstream).upstream_task_ids == {upstream}, downstream
+    # Tasks after the chain hang off its last task in parallel, with nothing after them.
+    assert dag.get_task(chain[-1]).downstream_task_ids == branches
+    for task_id in branches:
+        assert dag.get_task(task_id).upstream_task_ids == {chain[-1]}, task_id
+        assert dag.get_task(task_id).downstream_task_ids == set(), task_id
 
 
 @pytest.mark.parametrize(
@@ -94,6 +105,21 @@ def test_every_task_has_a_timeout_and_runs_in_the_repo_venv(dagbag: DagBag) -> N
             assert task.execution_timeout is not None, where
             assert task.cwd == str(REPO), where
             assert f"{REPO}/.venv/bin/" in task.bash_command, where
+
+
+@pytest.mark.parametrize(
+    ("task_id", "module"),
+    [
+        ("nlp_enrich", "src.ml.nlp_pipeline"),
+        ("train_salary_model", "src.ml.salary_model"),
+        ("forecast_demand", "src.ml.demand_forecast"),
+    ],
+)
+def test_ml_tasks_run_their_own_module_in_the_pipeline_venv(dagbag: DagBag, task_id: str, module: str) -> None:
+    # One process per task: keeps PyTorch (nlp_enrich) and XGBoost (train_salary_model) apart.
+    task = dagbag.dags["talentsignal_pipeline"].get_task(task_id)
+
+    assert task.bash_command == f"{REPO}/.venv/bin/python -m {module}"
 
 
 def test_fetch_jobs_gets_the_run_date_and_extra_retries(dagbag: DagBag) -> None:

@@ -78,7 +78,8 @@ infra/airflow/run_local.sh   # UI on http://localhost:8080 (Ctrl+C stops it)
 Login: user `admin`, password in `.airflow/simple_auth_manager_passwords.json.generated`.
 
 - `talentsignal_pipeline` (daily, 22:00 UTC): fetch_jobs → clean_jobs →
-  extract_skills → load_postgres → dbt_source_freshness → dbt_build
+  extract_skills → load_postgres → nlp_enrich → dbt_source_freshness →
+  dbt_build → train_salary_model and forecast_demand (in parallel)
 - `talentsignal_bls` (monthly): fetch_bls → clean_bls
 
 Both DAGs start paused, so nothing runs or spends JSearch quota until switched

@@ -1,6 +1,13 @@
-"""Daily TalentSignal pipeline: JSearch → S3 raw → Spark (Delta) → RDS → dbt.
+"""Daily TalentSignal pipeline: JSearch → S3 raw → Spark (Delta) → RDS → NLP → dbt → ML.
 
-fetch_jobs → clean_jobs → extract_skills → load_postgres → dbt_source_freshness → dbt_build
+fetch_jobs → clean_jobs → extract_skills → load_postgres → nlp_enrich
+    → dbt_source_freshness → dbt_build → (train_salary_model, forecast_demand)
+
+nlp_enrich (years of experience, embeddings, topics) runs before dbt because dbt
+reads its ml.* tables. The two models both read dbt marts but not each other, so
+both follow dbt_build directly: a failed salary run (e.g. Databricks down) doesn't
+block the forecast. Each task is its own process, which also keeps PyTorch
+(nlp_enrich) and XGBoost (train_salary_model) apart (OpenMP clash, CLAUDE.md 5.6).
 
 Every task is a BashOperator running the same command you would run by hand, in
 the project's own virtualenv (.venv). Airflow's environment (.venv-airflow) never
@@ -30,7 +37,7 @@ RUN_DATE = "{{ (logical_date or dag_run.run_after).strftime('%Y-%m-%d') }}"
 
 with DAG(
     dag_id="talentsignal_pipeline",
-    description="Daily: fetch postings → clean → extract skills → load RDS → dbt build",
+    description="Daily: fetch → clean → skills → load RDS → NLP → dbt → salary model + demand forecast",
     schedule="0 22 * * *",  # 22:00 UTC every day (6 pm US Eastern)
     start_date=pendulum.datetime(2026, 10, 1, tz="UTC"),
     catchup=False,  # when switched on, don't replay every missed day
@@ -66,6 +73,12 @@ with DAG(
         cwd=str(REPO),
         execution_timeout=timedelta(minutes=20),
     )
+    nlp_enrich = BashOperator(
+        task_id="nlp_enrich",
+        bash_command=f"{PYTHON} -m src.ml.nlp_pipeline",
+        cwd=str(REPO),
+        execution_timeout=timedelta(minutes=45),  # ~1 min awake; embeddings are the slow part
+    )
     dbt_source_freshness = BashOperator(
         task_id="dbt_source_freshness",
         bash_command=f"{DBT} source freshness {DBT_DIRS}",  # warns only (sources.yml)
@@ -79,4 +92,27 @@ with DAG(
         execution_timeout=timedelta(minutes=15),
     )
 
-    fetch_jobs >> clean_jobs >> extract_skills >> load_postgres >> dbt_source_freshness >> dbt_build
+    train_salary_model = BashOperator(
+        task_id="train_salary_model",
+        bash_command=f"{PYTHON} -m src.ml.salary_model",  # logs to MLflow (Databricks), then exports to S3
+        cwd=str(REPO),
+        execution_timeout=timedelta(minutes=30),
+    )
+    forecast_demand = BashOperator(
+        task_id="forecast_demand",
+        bash_command=f"{PYTHON} -m src.ml.demand_forecast",
+        cwd=str(REPO),
+        # Seconds today (no series passes the gate); ~20 min once all ~390 series forecast + backtest.
+        execution_timeout=timedelta(minutes=45),
+    )
+
+    (
+        fetch_jobs
+        >> clean_jobs
+        >> extract_skills
+        >> load_postgres
+        >> nlp_enrich
+        >> dbt_source_freshness
+        >> dbt_build
+        >> [train_salary_model, forecast_demand]
+    )
