@@ -156,4 +156,5 @@ jobs:
       - name: ML tests
         run: >-
           pytest -q tests/test_ml.py tests/test_nlp.py tests/test_embeddings.py tests/test_topics.py
-          tests/test_features.py tests/test_salary_model.py
+          tests/test_features.py tests/test_salary_model.py tests/test_demand_forecast.py
+          tests/test_resume_features.py

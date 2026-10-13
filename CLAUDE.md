@@ -88,7 +88,7 @@ talentsignal/
 │   │   ├── clean_bls.py          # BLS raw snapshots → occupations table
 │   │   ├── extract_skills.py     # PySpark UDF for skill extraction
 │   │   ├── load_postgres.py      # Delta tables → RDS raw schema (JDBC)
-│   │   └── postgres.py           # PostgresConfig (RDS from env vars), Spark-free
+│   │   └── postgres.py           # PostgresConfig + replace_tables() (one-transaction writer), Spark-free
 │   │
 │   ├── dbt_project/              # full dbt project lives here
 │   │   ├── dbt_project.yml
@@ -102,7 +102,8 @@ talentsignal/
 │   │   │   │   ├── stg_job_sightings.sql  # every collection, before dedup (Phase 5.0)
 │   │   │   │   ├── stg_posting_nlp.sql    # years of experience per posting (Phase 5.1a)
 │   │   │   │   ├── stg_topics.sql         # BERTopic topics; -1 = unassigned (Phase 5.1b)
-│   │   │   │   └── stg_posting_topics.sql # each posting's topic (Phase 5.1b)
+│   │   │   │   ├── stg_posting_topics.sql # each posting's topic (Phase 5.1b)
+│   │   │   │   └── stg_skill_demand_forecast.sql # forecast or gate verdict (Phase 5.3)
 │   │   │   ├── intermediate/
 │   │   │   │   ├── int_jobs_enriched.sql
 │   │   │   │   └── int_job_skills_joined.sql
@@ -159,8 +160,10 @@ talentsignal/
 │   ├── test_topics.py            # BERTopic on synthetic groups (ml CI job)
 │   ├── test_features.py          # salary-model features (no ML libs needed)
 │   ├── test_salary_model.py      # CV, baselines, what-if, MLflow, export (ml CI job)
+│   ├── test_demand_forecast.py   # gate, Prophet forecasts, backtest (ml CI job)
+│   ├── test_resume_features.py   # PDF → text → skills → features (ml CI job)
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
-│   └── fixtures/                 # e.g. a small made-up text-based resume PDF
+│   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
 └── .github/
     └── workflows/
@@ -619,12 +622,54 @@ Decisions (2026-10-07):
   seasonality, wide intervals; backtest vs "next week = this week" once
   ≥ 16 weeks. The 90-day horizon only for series that pass the gate.
 
+5.3 Status: BUILT (2026-10-13); no series passes the gate yet.
+- python -m src.ml.demand_forecast reads analytics_marts.mart_skill_demand
+  (role × skill × collection week share; unsampled weeks are gaps) and
+  rebuilds ml.skill_demand_forecast (replace_tables, one transaction).
+- < 12 weekly points → one 'insufficient_history' row with the latest
+  observed week + share. ≥ 12 → 13 weekly rows (91 days ≥ the 90-day
+  horizon): Prophet with linear trend, no seasonality, 95% intervals, shares
+  clipped to [0, 1], numpy seed fixed (Prophet samples its intervals) so
+  reruns match. ≥ 16 points → one-step-ahead backtest over the last 4 weeks:
+  backtest_mae_prophet vs backtest_mae_naive ("next week = this week").
+- Real data (2026-10-13): 390 series, ALL insufficient_history — only 2 collection
+  weeks exist (2026-09-28 for every role, 2026-10-05 for data engineer);
+  293 series have 1 point, 97 have 2. Forecasts need ≥ 12 weeks of weekly
+  collection: the daily DAG is still PAUSED — switch it on (and keep the Mac
+  awake at 22:00 UTC) → first forecasts ~12 weeks later.
+- dbt: source ml.skill_demand_forecast → stg_skill_demand_forecast; tests:
+  unique role|skill|week, accepted statuses, row consistency (forecast rows:
+  week after the last observed, 0 ≤ lower ≤ forecast ≤ upper ≤ 1;
+  insufficient rows: no forecast columns). `dbt build` PASS=98.
+- Tests: synthetic series — gate, 13 Mondays continuing a rising trend,
+  clipping of a falling series, backtest (Prophet beats naive on a clean
+  trend; naive MAE exactly 0.01), identical reruns. ~0.6 s per Prophet fit.
+
 5.4 Resume features (src/ml/resume_features.py), called by Phase 6:
 - extract_text(pdf_bytes): pdfplumber, in memory only; no text → clear error.
 - find_skills(text): the shared dictionary.
 - build_features(skills, role, seniority, state, remote): the SAME function
   training uses (no training/serving skew). Test fixture: a small made-up
   text-based PDF.
+
+5.4 Status: BUILT (2026-10-13).
+- src/ml/resume_features.py: extract_text(pdf_bytes) — pdfplumber on an
+  in-memory buffer, first 10 pages (caps huge uploads); non-PDF bytes →
+  ValueError "isn't a readable PDF"; no text → NoTextError ("Scanned or
+  image-only resumes aren't supported…", shown as is by the app).
+  find_skills = the shared dictionary (re-exported). build_features(skills,
+  role, seniority, state, remote, spec) wraps features.build_features — the
+  training function — with the spec from the exported feature_spec.json.
+- Fixture: tests/fixtures/resume_sample.pdf (934 bytes, made up), written by
+  make_resume_pdf.py (a hand-built one-page PDF; a test checks they match).
+  Extracts all 7 lines; skills: Python, SQL, Spark (from "Apache Spark" /
+  "PySpark"), Airflow, AWS, dbt, Docker, PostgreSQL.
+- Tests: extraction, skills, same features as training, scanned/no-text and
+  non-PDF errors, and a privacy guard (extract_text never opens a file for
+  writing).
+- Carry to Phase 6: the app process will load PyTorch (resume embedding for
+  matching) AND XGBoost (salary) — the 5.6 OpenMP rule. Verify on the Linux
+  server, or embed in a separate process.
 
 5.5 Airflow: … load_postgres → nlp_enrich → dbt_source_freshness →
 dbt_build → train_salary_model → forecast_demand (update test_dags.py).
@@ -640,8 +685,8 @@ pdfplumber as the `ml` dependency group. AWS cost $0.
   ~1.55 GB with NVIDIA libs), version read from requirements-ml.txt, then the
   lock with --no-deps (the lock is compiled on macOS; resolving again on Linux
   pulls XGBoost's 352 MB nvidia-nccl-cu12), then tests/test_ml.py,
-  test_nlp.py, test_embeddings.py, test_topics.py, test_features.py and
-  test_salary_model.py. The embedding model
+  test_nlp.py, test_embeddings.py, test_topics.py, test_features.py,
+  test_salary_model.py, test_demand_forecast.py and test_resume_features.py. The embedding model
   (~90 MB) is cached by actions/cache, keyed on src/ml/embeddings.py (which
   pins its revision).
 - CI `dbt` job pulls postgres:18 from Amazon's ECR Public mirror
