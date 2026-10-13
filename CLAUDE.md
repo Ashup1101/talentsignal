@@ -135,6 +135,7 @@ talentsignal/
 │   │   ├── embeddings.py         # chunked all-MiniLM-L6-v2 embeddings (postings AND resumes)
 │   │   ├── topics.py             # BERTopic settings + fit_topics()
 │   │   ├── salary_model.py       # XGBoost regressor + MLflow logging
+│   │   ├── features.py           # resume-derivable features; SAME build_features() for training + app
 │   │   ├── demand_forecast.py    # Prophet time-series per role × skill (gated)
 │   │   └── resume_features.py    # pdfplumber text → skills → model features
 │   │
@@ -156,6 +157,8 @@ talentsignal/
 │   ├── test_nlp.py               # years, boilerplate filter, ml.* rows (ml CI job)
 │   ├── test_embeddings.py        # chunking + weighted average; real model (ml CI job)
 │   ├── test_topics.py            # BERTopic on synthetic groups (ml CI job)
+│   ├── test_features.py          # salary-model features (no ML libs needed)
+│   ├── test_salary_model.py      # CV, baselines, what-if, MLflow, export (ml CI job)
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # e.g. a small made-up text-based resume PDF
 │
@@ -564,6 +567,41 @@ Decisions (2026-10-07):
 - Model + feature spec exported to the S3 curated bucket for the app.
 - Record the real MAE vs the < $9K target (expected to miss at 270 rows).
 
+5.2 Built 2026-10-10 — MLflow run + S3 export PENDING Databricks credentials:
+- Data (dbt marts): 270 salaried postings, 207 employers (most: Meta 9),
+  5 states + 27 with no location, 22 remote; $69K–$450K, median $162K.
+- src/ml/features.py (shared with 5.4 / the app, no PyTorch): Profile →
+  build_features(): 64 columns = role (5) + seniority_effective (6, incl.
+  unknown) + state (5 + unknown; unseen states/levels → unknown) + remote +
+  45 skills yes/no (≥ 10 training postings, chosen inside each CV fold) +
+  skill_count (all dictionary skills). Unknown role → ValueError.
+- XGBoost on log(salary): depth 3, learning rate 0.05, subsample and
+  column sample 0.8, min_child_weight 3. Trees per fold by early stopping on
+  20% of the fold's employers (40–190); final model = median (152).
+- Grouped 5-fold CV (by employer), MAE in dollars, out of fold:
+  model $34,236 | role × seniority median $37,097 | role median $41,231 |
+  global median $48,954. Per role (model vs role median): data analyst
+  $23.7K vs $26.8K, data engineer $26.3K vs $37.1K, data scientist $41.2K
+  vs $51.9K (role × seniority $40.2K is better here), ML engineer $40.9K vs
+  $46.0K, software engineer $41.8K vs $46.8K.
+- 5 random splits: model $33.4K–$35.9K vs role median $41.2K–$42.3K
+  (role × seniority $36.1K–$38.3K): beats the role median every time →
+  use_model = true. Target < $9K MISSED: MAE ≈ 21% of salary (median
+  absolute error $26K); ~270 rows can't support it.
+- What-if (skill_impact): predicted change when one skill is added
+  (skill_count +1), only for skills in ≥ 5 salaried postings of the role
+  (what_if_skills; same floor as mart_skill_salary_by_role). E.g. analysts
+  dbt +$15K, Excel −$6K; ML/software engineers C++ +$14–16K; software
+  engineers Git −$27K (Git comes with junior/generalist postings).
+  Associations, not causal — UI wording "associated with".
+- MLflow (_log_to_mlflow): params, CV MAE overall + per role for model and
+  baselines, use_model tag, feature_spec.json, model_card.json, the model.
+  The S3 export runs only after logging succeeds: s3://{S3_CURATED_BUCKET}/
+  models/salary/model.json (XGBoost JSON) + feature_spec.json (spec, what-if
+  skills, baseline medians for the fallback, CV MAE, use_model, run id).
+- Tests use a throwaway local MLflow store; MLflow 3.17 refuses plain-folder
+  stores unless MLFLOW_ALLOW_FILE_STORE=true (tests only).
+
 5.3 Demand forecast (src/ml/demand_forecast.py):
 - Series: per role × skill, share of that role's collected postings per
   collection week mentioning the skill, zero-filled.
@@ -593,7 +631,8 @@ pdfplumber as the `ml` dependency group. AWS cost $0.
   ~1.55 GB with NVIDIA libs), version read from requirements-ml.txt, then the
   lock with --no-deps (the lock is compiled on macOS; resolving again on Linux
   pulls XGBoost's 352 MB nvidia-nccl-cu12), then tests/test_ml.py,
-  test_nlp.py, test_embeddings.py and test_topics.py. The embedding model
+  test_nlp.py, test_embeddings.py, test_topics.py, test_features.py and
+  test_salary_model.py. The embedding model
   (~90 MB) is cached by actions/cache, keyed on src/ml/embeddings.py (which
   pins its revision).
 - CI `dbt` job pulls postgres:18 from Amazon's ECR Public mirror

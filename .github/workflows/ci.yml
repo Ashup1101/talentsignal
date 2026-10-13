@@ -154,4 +154,6 @@ jobs:
           key: hf-${{ runner.os }}-${{ hashFiles('src/ml/embeddings.py') }}
 
       - name: ML tests
-        run: pytest -q tests/test_ml.py tests/test_nlp.py tests/test_embeddings.py tests/test_topics.py
+        run: >-
+          pytest -q tests/test_ml.py tests/test_nlp.py tests/test_embeddings.py tests/test_topics.py
+          tests/test_features.py tests/test_salary_model.py
