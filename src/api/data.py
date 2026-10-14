@@ -1,15 +1,15 @@
-"""Read-only data access for the Streamlit app (Phase 6 step 2).
+"""Read-only data access for the app's API (Phase 6 step 2).
 
 Everything the pages show comes from here:
 - PostgreSQL as app_reader (SELECT-only on the dbt schemas and ml.*), through a
-  small thread-safe connection pool (Streamlit serves each session on a thread);
+  small thread-safe connection pool (FastAPI runs plain endpoints on a thread pool);
 - the Phase 5 exports in the S3 curated bucket (salary model, its card, the
   posting embeddings), via boto3's default credentials: .env keys on the laptop,
   the EC2 instance role on the server.
 
 Results are cached for CACHE_SECONDS (the pipeline refreshes once a night). No
-Streamlit imports: functions return plain dicts or pandas DataFrames, which keeps
-them testable without a browser. A page can't change the cached data: results are
+web-framework imports: functions return plain dicts or pandas DataFrames, which keeps
+them testable on their own. A caller can't change the cached data: results are
 deep copies, and values nested in cells are immutable (skills are tuples,
 embedding vectors are read-only arrays).
 """
@@ -28,6 +28,7 @@ from functools import lru_cache, wraps
 from typing import Any, TypeVar
 
 import boto3
+import psycopg2
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
@@ -120,9 +121,17 @@ def _connection() -> Iterator[Any]:
 
 
 def _query(sql: str) -> pd.DataFrame:
-    with _connection() as conn, conn.cursor() as cur:
-        cur.execute(sql)
-        frame = pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
+    # A pooled connection can die while idle (server timeout, laptop asleep): the first
+    # use fails, _connection() discards it, and one retry on a fresh connection succeeds.
+    for attempt in (1, 2):
+        try:
+            with _connection() as conn, conn.cursor() as cur:
+                cur.execute(sql)
+                frame = pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
+            break
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if attempt == 2:
+                raise
     # psycopg2 returns NUMERIC as Decimal; pages and models want floats.
     for column in frame.columns:
         if frame[column].map(lambda v: isinstance(v, Decimal)).any():

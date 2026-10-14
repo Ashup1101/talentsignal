@@ -1,7 +1,7 @@
 """The Resume Analyzer's calculations, as plain functions (Phase 6 step 3).
 
 The pages only display what these return, so every number on screen is unit-tested.
-Inputs are the frames and dicts from src/app/data.py plus what the resume yields
+Inputs are the frames and dicts from src/api/data.py plus what the resume yields
 (skills from the shared dictionary, an embedding from src/ml/embeddings.py).
 Decisions: CLAUDE.md Phase 6 D1–D3. Salary differences are associations from
 postings, never causal effects: the UI says "associated with".
@@ -16,12 +16,20 @@ import numpy as np
 import pandas as pd
 from xgboost import XGBRegressor
 
-from src.app import serving
+from src.api import serving
 from src.ml.artifacts import EMBEDDING_MODEL_REVISION
 from src.ml.features import UNKNOWN, FeatureSpec, Profile
 
 CORE_SKILL_MIN_SHARE = 0.10  # D2: a role's skills = those in ≥ 10% of its postings
 RECENT_DAYS = 7  # "this week's postings"
+# Fix 3 (2026-10-14): a with/without salary difference is shown only with this many
+# salaries on EACH side (the mart's floor is 5; 7-vs-66 comparisons read -$33K).
+MIN_SALARIES_PER_SIDE = 10
+MIN_LEVEL_SALARIES = 5  # posted median for role × level (dbt's min_salary_sample)
+# A what-if under $500 would show as "$0" at the UI's $1,000 rounding.
+NO_EFFECT_BELOW = 500
+# Rough order of levels for "at or near your level" (manager ~ staff+).
+LEVEL_RANK = {"intern": 0, "junior": 1, "mid": 2, "senior": 3, "staff_plus": 4, "manager": 4}
 
 
 def core_skills(resume_skills: Iterable[str], role: str, skill_demand_df: pd.DataFrame) -> pd.DataFrame:
@@ -71,6 +79,21 @@ def _optional(value: object) -> float | None:
     return None if value is None or pd.isna(value) else float(value)
 
 
+def impact_status(value: float | None) -> str:
+    """How a model what-if may be shown.
+
+    Args:
+        value: Dollars from serving.skill_impact, or None when the model can't say.
+
+    Returns:
+        'not_enough_data' (None), 'no_measurable_effect' (|value| < NO_EFFECT_BELOW,
+        which would read "$0" at $1,000 rounding) or 'value'.
+    """
+    if value is None:
+        return "not_enough_data"
+    return "no_measurable_effect" if abs(value) < NO_EFFECT_BELOW else "value"
+
+
 def top_missing_skills(
     resume_skills: Iterable[str],
     role: str,
@@ -90,7 +113,8 @@ def top_missing_skills(
     - model_impact: the model's what-if for this profile (skills in the card's
       what_if_skills for the role, and only when the card says use_model);
     - median_salary_difference: within-role median with vs without the skill
-      (mart_skill_salary_by_role; only when both sides have enough salaries).
+      (mart_skill_salary_by_role; only with MIN_SALARIES_PER_SIDE salaries on
+      each side — smaller samples swing by tens of thousands).
 
     Args:
         resume_skills: Skills found on the resume.
@@ -106,9 +130,9 @@ def top_missing_skills(
 
     Returns:
         Up to n dicts, most in-demand first: skill, skill_category,
-        share_of_role_postings, demand_rank, model_impact,
-        median_salary_difference, salary_sample_status, n_salaried_with_skill,
-        n_salaried_without_skill.
+        share_of_role_postings, demand_rank, model_impact, model_impact_status
+        (impact_status), median_salary_difference, median_difference_status
+        ('ok' or 'too_few_salaries'), n_salaried_with_skill, n_salaried_without_skill.
     """
     found = frozenset(resume_skills)
     rows = skill_demand_df[(skill_demand_df["role_name"] == role) & ~skill_demand_df["skill_name"].isin(found)]
@@ -120,22 +144,63 @@ def top_missing_skills(
         if candidates
         else {}
     )
-    return [
-        {
-            "skill": row.skill_name,
-            "skill_category": row.skill_category,
-            "share_of_role_postings": float(row.share_of_role_postings),
-            "demand_rank": int(row.demand_rank),
-            "model_impact": impacts.get(row.skill_name),
-            "median_salary_difference": (
-                _optional(row.median_salary_difference) if row.salary_sample_status == "ok" else None
-            ),
-            "salary_sample_status": row.salary_sample_status,
-            "n_salaried_with_skill": int(row.n_salaried_with_skill),
-            "n_salaried_without_skill": int(row.n_salaried_without_skill),
-        }
-        for row in picks.itertuples()
+    result = []
+    for row in picks.itertuples():
+        n_with, n_without = int(row.n_salaried_with_skill), int(row.n_salaried_without_skill)
+        difference = _optional(row.median_salary_difference)
+        enough = (
+            row.salary_sample_status == "ok"
+            and difference is not None
+            and min(n_with, n_without) >= MIN_SALARIES_PER_SIDE
+        )
+        impact = impacts.get(row.skill_name)
+        result.append(
+            {
+                "skill": row.skill_name,
+                "skill_category": row.skill_category,
+                "share_of_role_postings": float(row.share_of_role_postings),
+                "demand_rank": int(row.demand_rank),
+                "model_impact": impact,
+                "model_impact_status": impact_status(impact),
+                "median_salary_difference": difference if enough else None,
+                "median_difference_status": "ok" if enough else "too_few_salaries",
+                "n_salaried_with_skill": n_with,
+                "n_salaried_without_skill": n_without,
+            }
+        )
+    return result
+
+
+def level_salary(
+    postings_df: pd.DataFrame, role: str, seniority: str, min_salaries: int = MIN_LEVEL_SALARIES
+) -> dict:
+    """Fix 1 (2026-10-14): the posted median for this role AND level, shown beside the estimate.
+
+    The model pulls toward the overall average (e.g. junior data analyst estimated
+    ~$121K vs a $79K posted median), so the level's own median keeps it honest.
+
+    Args:
+        postings_df: data.postings().
+        role: Target role.
+        seniority: The user's chosen level.
+        min_salaries: Smallest sample worth a median.
+
+    Returns:
+        median (dollars or None), n (salaries found), status: 'ok', 'too_few_salaries',
+        or 'no_level' when the user isn't sure of their level (postings whose own level
+        is unknown say nothing about the user).
+    """
+    if seniority not in LEVEL_RANK:
+        return {"median": None, "n": 0, "status": "no_level"}
+    rows = postings_df[
+        (postings_df["role_name"] == role)
+        & (postings_df["seniority_effective"] == seniority)
+        & postings_df["salary_mid_annual"].notna()
     ]
+    n = len(rows)
+    if n < min_salaries:
+        return {"median": None, "n": n, "status": "too_few_salaries"}
+    return {"median": float(rows["salary_mid_annual"].astype(float).median()), "n": n, "status": "ok"}
 
 
 def predict_salary_for_resume(
@@ -203,6 +268,7 @@ def match_postings(
     top_n: int = 10,
     *,
     resume_skills: Iterable[str] = (),
+    seniority: str | None = None,
     now: datetime | None = None,
 ) -> pd.DataFrame:
     """D1: the role's recent postings most similar to the resume (cosine similarity).
@@ -212,6 +278,10 @@ def match_postings(
     every 5 days). frame.attrs says which: window ('last_7_days' or
     'latest_collection') and since (the oldest fetch date included).
 
+    Fix 2 (2026-10-14): postings at or near the user's level (±1 step in
+    LEVEL_RANK) come first, so a junior isn't shown only VP roles. Postings with
+    an unknown level, or a user who isn't sure, count as near.
+
     Args:
         resume_embedding: The resume's vector (embeddings.embed_texts, length 1).
         posting_embeddings_df: data.posting_embeddings().
@@ -219,12 +289,14 @@ def match_postings(
         role: Target role, or None for every role.
         top_n: How many postings.
         resume_skills: Skills found on the resume (to show the shared ones).
+        seniority: The user's chosen level, or None / 'unknown' for no preference.
         now: Current time (tests pass a fixed one).
 
     Returns:
-        Up to top_n postings, most similar first: job_id, role_name, job_title,
-        employer_name, location_name, is_remote, fetched_at, salary_mid_annual,
-        apply_link, similarity, shared_skills (tuple).
+        Up to top_n postings — near the user's level first, then most similar:
+        job_id, role_name, job_title, employer_name, location_name, is_remote,
+        fetched_at, salary_mid_annual, apply_link, level (seniority_effective),
+        near_level, similarity, shared_skills (tuple).
 
     Raises:
         ValueError: If the posting embeddings come from another model revision.
@@ -238,7 +310,12 @@ def match_postings(
     pool = postings_df if role is None else postings_df[postings_df["role_name"] == role]
     pool = pool[pool["job_id"].isin(set(posting_embeddings_df["job_id"]))]
     if pool.empty:
-        frame = pool.assign(similarity=pd.Series(dtype=float), shared_skills=pd.Series(dtype=object))
+        frame = pool.assign(
+            level=pd.Series(dtype=object),
+            near_level=pd.Series(dtype=bool),
+            similarity=pd.Series(dtype=float),
+            shared_skills=pd.Series(dtype=object),
+        )
         frame.attrs = {"window": "none", "since": None}
         return frame
 
@@ -260,13 +337,24 @@ def match_postings(
         "job_id", "role_name", "job_title", "employer_name", "location_name", "is_remote",
         "fetched_at", "salary_mid_annual", "apply_link",
     ]
+    user_rank = LEVEL_RANK.get(seniority or UNKNOWN)
+    near = [
+        user_rank is None or level not in LEVEL_RANK or abs(LEVEL_RANK[level] - user_rank) <= 1
+        for level in recent["seniority_effective"]
+    ]
     frame = recent[columns].assign(
+        level=recent["seniority_effective"],
+        near_level=near,
         similarity=similarity,
         shared_skills=[
             tuple(skill for skill in posting_skills if skill in found) for posting_skills in recent["skills"]
         ],
     )
-    frame = frame.sort_values(["similarity", "job_id"], ascending=[False, True]).head(top_n).reset_index(drop=True)
+    frame = (
+        frame.sort_values(["near_level", "similarity", "job_id"], ascending=[False, False, True])
+        .head(top_n)
+        .reset_index(drop=True)
+    )
     frame.attrs = {"window": window, "since": recent["fetched_at"].min().date()}
     return frame
 

@@ -1,4 +1,4 @@
-"""Tests for src/app/logic.py and src/app/serving.py on stub data with known answers.
+"""Tests for src/api/logic.py and src/api/serving.py on stub data with known answers.
 
 A tiny XGBoost model is trained on synthetic salaries where Spark adds 30%. Skipped
 where XGBoost isn't installed (the CI pytest job); runs in the `ml` job.
@@ -20,7 +20,7 @@ pytest.importorskip("xgboost")
 
 from xgboost import XGBRegressor  # noqa: E402
 
-from src.app import logic, serving  # noqa: E402
+from src.api import logic, serving  # noqa: E402
 from src.ml.artifacts import EMBEDDING_MODEL_REVISION  # noqa: E402
 from src.ml.features import UNKNOWN, Profile, build_features, fit_spec  # noqa: E402
 
@@ -191,21 +191,21 @@ def _embeddings(revision: str = EMBEDDING_MODEL_REVISION) -> pd.DataFrame:
 
 def _postings() -> pd.DataFrame:
     rows = [
-        ("a", DE, NOW - timedelta(days=1), ("SQL", "Spark")),
-        ("b", DE, NOW - timedelta(days=2), ("Python",)),
-        ("c", DE, NOW - timedelta(days=6), ("Excel",)),
-        ("old", DE, NOW - timedelta(days=30), ("SQL",)),  # most similar, but not recent
-        ("d", DE, NOW - timedelta(days=1), ("SQL",)),  # no embedding: skipped
-        ("x", DA, NOW - timedelta(days=20), ("SQL",)),
+        ("a", DE, NOW - timedelta(days=1), ("SQL", "Spark"), "manager"),
+        ("b", DE, NOW - timedelta(days=2), ("Python",), "mid"),
+        ("c", DE, NOW - timedelta(days=6), ("Excel",), "junior"),
+        ("old", DE, NOW - timedelta(days=30), ("SQL",), "mid"),  # most similar, but not recent
+        ("d", DE, NOW - timedelta(days=1), ("SQL",), "mid"),  # no embedding: skipped
+        ("x", DA, NOW - timedelta(days=20), ("SQL",), "unknown"),
     ]
     return pd.DataFrame(
         [
             {
                 "job_id": j, "role_name": r, "job_title": f"title {j}", "employer_name": "E",
                 "location_name": "NY", "is_remote": False, "fetched_at": t, "salary_mid_annual": None,
-                "apply_link": f"https://jobs/{j}", "skills": s,
+                "apply_link": f"https://jobs/{j}", "skills": s, "seniority_effective": level,
             }
-            for j, r, t, s in rows
+            for j, r, t, s, level in rows
         ]
     )
 
@@ -245,9 +245,9 @@ def test_role_with_no_postings_gives_an_empty_result() -> None:
 
 def test_app_survives_pytorch_and_xgboost_in_one_process() -> None:
     # Regression: PyTorch + XGBoost in one process segfaulted (exit 139) on macOS
-    # unless OMP_NUM_THREADS=1. src.app pins it; prove it with the variable unset.
+    # unless OMP_NUM_THREADS=1. src.api pins it; prove it with the variable unset.
     code = (
-        "import os, numpy as np, src.app.serving, xgboost\n"
+        "import os, numpy as np, src.api.serving, xgboost\n"
         "from src.ml.embeddings import embed_texts\n"
         "embed_texts(['Data engineer: Python, SQL, Spark pipelines on AWS. ' * 40])\n"
         "X = np.random.default_rng(0).normal(size=(300, 5))\n"
@@ -304,3 +304,56 @@ def test_topic_role_mix_shares_each_topics_postings_across_roles() -> None:
 
     assert mix[["topic_id", "role_name", "n_postings"]].values.tolist() == [[0, DE, 2], [0, DA, 1], [1, DA, 1]]
     assert mix["share_of_topic"].round(3).tolist() == [0.667, 0.333, 1.0]
+
+
+# --- The 2026-10-14 fixes -----------------------------------------------------------------
+
+
+def test_postings_near_the_users_level_come_first() -> None:
+    result = logic.match_postings(
+        np.array([1.0, 0.0, 0.0]), _embeddings(), _postings(), DE, seniority="junior", now=NOW
+    )
+
+    # Junior: mid (b) and junior (c) are within one step; manager (a) is not, despite the best similarity.
+    assert result["job_id"].tolist() == ["b", "c", "a"]
+    assert result["near_level"].tolist() == [True, True, False]
+    assert result["level"].tolist() == ["mid", "junior", "manager"]
+
+
+def test_a_user_who_isnt_sure_of_their_level_gets_plain_similarity_order() -> None:
+    result = logic.match_postings(np.array([1.0, 0.0, 0.0]), _embeddings(), _postings(), DE, seniority=UNKNOWN, now=NOW)
+
+    assert result["job_id"].tolist() == ["a", "b", "c"] and result["near_level"].all()
+
+
+def test_level_salary_is_the_posted_median_for_role_and_level() -> None:
+    postings = pd.DataFrame(
+        {
+            "role_name": [DA] * 6 + [DE],
+            "seniority_effective": ["junior"] * 5 + ["senior", "junior"],
+            "salary_mid_annual": [70_000.0, 75_000.0, 79_000.0, 85_000.0, 90_000.0, 130_000.0, 150_000.0],
+        }
+    )
+
+    assert logic.level_salary(postings, DA, "junior") == {"median": 79_000.0, "n": 5, "status": "ok"}
+    assert logic.level_salary(postings, DA, "senior") == {"median": None, "n": 1, "status": "too_few_salaries"}
+    assert logic.level_salary(postings, DA, UNKNOWN) == {"median": None, "n": 0, "status": "no_level"}
+
+
+def test_median_difference_needs_ten_salaries_on_each_side(trained: tuple) -> None:
+    model, card, _ = trained
+    small = DEMAND.copy()
+    small.loc[(small.role_name == DE) & (small.skill_name == "Spark"), "n_salaried_with_skill"] = 9
+
+    by_skill = {m["skill"]: m for m in logic.top_missing_skills({"SQL"}, DE, small, card, model, serving_spec(card))}
+
+    assert by_skill["Spark"]["median_salary_difference"] is None  # 9 vs 30: hidden
+    assert by_skill["Spark"]["median_difference_status"] == "too_few_salaries"
+    assert by_skill["Spark"]["model_impact_status"] == "value"
+
+
+def test_impact_status_words_the_what_if() -> None:
+    assert logic.impact_status(None) == "not_enough_data"
+    assert logic.impact_status(0.0) == "no_measurable_effect"
+    assert logic.impact_status(-499.0) == "no_measurable_effect"
+    assert logic.impact_status(500.0) == "value" and logic.impact_status(-4_000.0) == "value"

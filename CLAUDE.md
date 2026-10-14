@@ -4,7 +4,7 @@
 An end-to-end job market intelligence platform. Raw job postings are ingested
 from public APIs, processed at scale with PySpark on Databricks, modeled with
 dbt, orchestrated by Airflow, enriched with NLP + ML, and served through a
-hosted Streamlit app on AWS EC2.
+web app on AWS EC2: a Next.js frontend (static export) over a FastAPI API.
 
 The end product is a resume intelligence tool: a user uploads a resume PDF and
 sees how it compares with what real postings ask for — skill demand, match per
@@ -29,7 +29,9 @@ instead of a market dashboard); update the resume to match what is built.
   Prophet skill-demand forecaster with a 90-day horizon.
 - Airflow: daily DAG using DatabricksRunNowOperator to chain ingestion →
   PySpark → dbt run → ML retraining.
-- App: four-page Streamlit resume intelligence tool on EC2 behind nginx,
+- App (changed 2026-10-14 from Streamlit at the user's request): resume
+  intelligence web app — Next.js static export (React, TypeScript, Tailwind,
+  shadcn/ui, Recharts) over a FastAPI API — on EC2 behind nginx,
   CI/CD via GitHub Actions. Upload a resume PDF → skills found (regex +
   keyword matching with the pipeline's skill dictionary, no LLM) with their
   demand in real postings, match % per target role, XGBoost salary
@@ -53,7 +55,9 @@ the actual result (e.g. real held-out MAE), even if it misses the target.
                     user 2026-10-07: no real use in this project)
 - ML:               XGBoost, Prophet, scikit-learn, MLflow (hosted on Databricks
                     Free Edition, the successor of Community Edition)
-- App:              Streamlit, pdfplumber (resume PDF → text)
+- App:              Next.js (React, TypeScript, Tailwind CSS, shadcn/ui, Recharts,
+                    Lucide) as a static export; FastAPI + uvicorn; pdfplumber.
+                    Streamlit replaced 2026-10-14 (user's request).
 - Hosting:          AWS EC2 t3.small, nginx, systemd, GitHub Actions CI/CD
 - Python deps:      managed via pyproject.toml + pip-tools
 
@@ -66,15 +70,14 @@ talentsignal/
 ├── README.md
 ├── pyproject.toml
 ├── .gitignore
-├── .streamlit/config.toml        # app: 5 MB uploads, no usage stats, no error details for visitors
 │
 ├── infra/
 │   ├── terraform/                # S3 buckets, RDS, EC2 (scaffold only for now)
 │   ├── airflow/
 │   │   ├── install.sh            # creates .venv-airflow: Airflow 3 + constraints
 │   │   └── run_local.sh          # env vars + `airflow standalone` (UI :8080)
-│   ├── app/
-│   │   └── run_local.sh          # the Streamlit app on localhost:8501
+│   ├── api/
+│   │   └── run_local.sh          # the FastAPI API on localhost:8000 (/api/docs)
 │   └── docker-compose.yml        # Phase 6 app containers (not used for Airflow)
 │
 ├── src/
@@ -145,21 +148,16 @@ talentsignal/
 │   │   ├── demand_forecast.py    # Prophet time-series per role × skill (gated)
 │   │   └── resume_features.py    # pdfplumber text → skills → model features
 │   │
-│   └── app/
-│       ├── streamlit_app.py      # entry point
-│       ├── data.py               # read-only data access: cached RDS queries + S3 loaders (no Streamlit)
-│       ├── db_setup.py           # creates app_reader, the read-only DB user (run once)
+│   └── api/                      # the app's Python API (FastAPI), Phase 6
 │       ├── __init__.py           # pins OMP_NUM_THREADS=1 (PyTorch + XGBoost in one process)
+│       ├── main.py               # endpoints: /api/options, overview, analyze, salaries, skills, forecast, insights
+│       ├── schemas.py            # Pydantic response models (→ OpenAPI → frontend types)
+│       ├── data.py               # read-only data access: cached RDS queries + S3 loaders
+│       ├── db_setup.py           # creates app_reader, the read-only DB user (run once)
 │       ├── serving.py            # salary model: load from JSON (1 thread), predict, what-if
-│       ├── logic.py              # match %, missing skills, salary + range, posting matching
-│       ├── formatting.py         # wording/rounding rules ("no measurable effect"), no Streamlit
-│       ├── ui.py                 # shared page setup, cached model, friendly load errors
-│       ├── assets/sample_resume.pdf  # = tests/fixtures/resume_sample.pdf (made up)
-│       └── pages/                # Streamlit orders the sidebar by filename
-│           ├── 01_resume_analyzer.py  # upload resume PDF → skills, match %, salary, gaps
-│           ├── 02_salary_explorer.py  # percentiles by level/state vs BLS
-│           ├── 03_skill_demand.py     # demand ranks + forecast status (Prophet)
-│           └── 04_job_insights.py     # topics, role mix, seniority, remote
+│       └── logic.py              # match %, missing skills, salary + level median, matching
+│
+├── web/                          # Next.js frontend (static export), Phase 6 — next PR
 │
 ├── tests/
 │   ├── test_ingestion.py
@@ -175,12 +173,11 @@ talentsignal/
 │   ├── test_salary_model.py      # CV, baselines, what-if, MLflow, export (ml CI job)
 │   ├── test_demand_forecast.py   # gate, Prophet forecasts, backtest (ml CI job)
 │   ├── test_resume_features.py   # PDF → text → skills → features (ml CI job)
-│   ├── test_app_data.py          # data.py with a stub DB pool + Stubber S3
+│   ├── test_api_data.py          # data.py with a stub DB pool + Stubber S3
 │   ├── test_db_setup.py          # app_reader statements; password only as a parameter
-│   ├── test_app_logic.py         # logic + serving on stub data; OpenMP regression (ml CI job)
-│   ├── test_app_formatting.py    # wording and rounding rules
-│   ├── test_app_pages.py         # Streamlit AppTest of all five pages (ml CI job)
-│   ├── app_stubs.py              # stub data + tiny XGBoost model for the page tests
+│   ├── test_api_logic.py         # logic + serving on stub data; OpenMP regression
+│   ├── test_api_routes.py        # every endpoint via TestClient on stub data
+│   ├── api_stubs.py              # stub data + tiny XGBoost model for the API tests
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
@@ -813,11 +810,19 @@ Decisions (2026-10-13):
 - D5 Deploy via GitHub OIDC → AWS SSM Run Command: no SSH port open to the
   internet; the user creates the IAM role for GitHub in the console.
 - D6 Docker: the app (and nginx) in Docker Compose, started by systemd.
+- D7–D10 (2026-10-14, the user pivoted the UI from Streamlit): D7 Next.js as a
+  static export served by nginx, which proxies /api to the API (no Node
+  process on the 2 GB server); D8 FastAPI (typed models, OpenAPI → TS
+  types); D9 shadcn/ui + Recharts + Lucide on Tailwind (one design system;
+  no Tremor); D10 the Streamlit pages (PR #12, already merged) removed and
+  their non-UI code moved into src/api.
 - "This week's postings" = fetched in the last 7 days; when a role has
   none, the latest collection, labelled with its date (the free JSearch
   plan refreshes each role about every 5 days).
 
 Dependencies (approved 2026-10-13):
+- (2026-10-14: streamlit swapped for fastapi>=0.143,<0.144 + uvicorn>=0.54,<0.55;
+  laptop lock back to 165 packages, server lock 68, identical pins.)
 - pyproject `app` group: streamlit>=1.65,<2 + pyarrow>=25,<26 (the
   embeddings Parquet; until now only via PySpark in dev). Streamlit 1.65.0
   fits every existing pin: requirements-ml.txt (laptop) 165 → 173 packages,
@@ -912,7 +917,8 @@ Step 3 Status: BUILT (2026-10-13) — app logic as tested pure functions.
   split on those skills) while within-role medians differ by thousands —
   word $0 as "no measurable effect in the model".
 
-Step 4 Status: BUILT (2026-10-13) — the five pages.
+Step 4 Status: BUILT (2026-10-13) — the five Streamlit pages; SUPERSEDED 2026-10-14
+(Streamlit removed; see the API status below).
 - Pages run as separate scripts (pages/ folder) and each starts with
   `from src.app import ui` (pins OMP_NUM_THREADS first). Home: overview,
   links, data freshness (postings, newest collection age, last 7 days,
@@ -945,6 +951,51 @@ Step 4 Status: BUILT (2026-10-13) — the five pages.
 - Real data: every page renders with no exceptions or errors (AppTest
   against RDS + S3). Run locally: infra/app/run_local.sh →
   http://localhost:8501 (localhost only).
+- Tried on the user's own resumes (7 versions, 2026-10-14): text extracted from
+  all, 14–45 skills each, best matches data scientist / data analyst
+  (77–95%). Found: (1) junior salary estimates read high — a junior data
+  analyst got ~$121K vs a $79K posted junior median: the model barely
+  separates levels and pulls toward the average (skill_count was ruled
+  out: 5→45 skills moved it ~$100); (2) matches ignored level (Senior / VP
+  roles for a junior); (3) with/without medians from 7–10 postings swung
+  ±$33K. NOTE: those AppTest runs silently kept state = CA (setting the
+  selectbox to None didn't take); state=CA reproduces the $129K reported.
+
+API Status: BUILT (2026-10-14) — Streamlit → FastAPI (PR B adds the Next.js web/).
+- src/app → src/api (git mv: data, logic, serving, db_setup, __init__);
+  Streamlit pages, ui.py, formatting.py, .streamlit/, infra/app removed.
+- Endpoints (src/api/main.py; docs at /api/docs): GET /api/health (no
+  backend), /api/options (roles, levels with labels, states), /api/overview
+  (freshness), /api/salaries?level&state, /api/skills?role,
+  /api/forecast?role&skill, /api/insights; POST /api/analyze?role&level
+  &state&remote with the raw PDF as the body.
+- Resume privacy: raw body (no multipart → FastAPI never spools it to a
+  temp file, which it does above 1 MB); read in memory with the 5 MB cap
+  enforced while streaming; the response never contains the text; nothing
+  saved or logged. CPU work runs in a worker thread (run_in_threadpool).
+- Errors: 415 not a PDF, 413 > 5 MB, 400 empty / unreadable PDF, 422 no text
+  (scanned) / unknown role / unknown level, 404 missing forecast series,
+  503 backend down — plain messages + a code, never internals.
+- Statuses carry the decisions (frontend only formats): model_impact_status
+  (value | no_measurable_effect under $500 | not_enough_data),
+  median_difference_status, level_median.status.
+- Fixes (logic.py): (1) level_salary → the posted median for role × level
+  with n, shown beside the estimate (junior data analyst: $79,200, n=5);
+  (2) match_postings ranks postings within one step of the user's level
+  first (LEVEL_RANK; unknown = near) and returns level + near_level;
+  (3) a with/without median difference needs ≥ 10 salaries on each side
+  (MIN_SALARIES_PER_SIDE; e.g. Data Modeling 9 vs 54 → hidden).
+- Real-data run caught a stale pooled connection (first request after
+  idle → 503): data._query now retries once on a fresh connection.
+- Real data (localhost:8000): every endpoint 200; cached reads 4–36 ms;
+  analyze 0.84 s. Error cases verified with curl.
+- Tests: test_api_routes.py (TestClient on stubs: every endpoint, all error
+  codes, upload cap, no resume text in the response), fix tests in
+  test_api_logic.py, retry test in test_api_data.py. CI job "API tests
+  (server lock)" installs exactly CPU PyTorch + requirements-app.txt.
+- Follow-ups: Starlette deprecates httpx for TestClient (install httpx2
+  when it stops working); retrain the salary model to weigh level (fix 1
+  only shows the gap).
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their
@@ -983,7 +1034,7 @@ DATABRICKS_HOST=            # Phase 5: Databricks Free Edition workspace URL (ho
 DATABRICKS_TOKEN=           # Phase 5: personal access token for that workspace
 MLFLOW_TRACKING_URI=databricks
 MLFLOW_EXPERIMENT_NAME=     # Phase 5: e.g. /Users/<your email>/talentsignal-salary
-APP_DB_USER=app_reader     # Phase 6: the app's read-only DB user (src/app/db_setup.py)
+APP_DB_USER=app_reader     # Phase 6: the app's read-only DB user (src/api/db_setup.py)
 APP_DB_PASSWORD=           # Phase 6: random; generated into .env, never printed
 ```
 

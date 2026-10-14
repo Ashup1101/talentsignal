@@ -1,8 +1,8 @@
-"""Stub data for the Streamlit page tests, shaped like src/app/data.py's results.
+"""Stub data for the API tests, shaped like src/api/data.py's results.
 
 install() swaps every data loader (and the resume embedder) for these stubs, so the
-pages run with no database, S3 or embedding model. The salary model is a tiny real
-XGBoost model trained on the stub postings.
+endpoints run with no database, S3 or embedding model. The salary model is a tiny
+real XGBoost model trained on the stub postings.
 """
 
 from __future__ import annotations
@@ -162,8 +162,8 @@ def _embeddings() -> pd.DataFrame:
 
 
 def install(monkeypatch: pytest.MonkeyPatch, *, forecasting: bool = False) -> None:
-    """Point every page's data at the stubs (copies, so a page can't change them)."""
-    from src.app import data, ui
+    """Point every endpoint's data at the stubs (copies, so a request can't change them)."""
+    from src.api import data, main
     from src.ml import embeddings
 
     card, model_json = _model()
@@ -176,7 +176,7 @@ def install(monkeypatch: pytest.MonkeyPatch, *, forecasting: bool = False) -> No
     for name, func in stubs.items():
         monkeypatch.setattr(data, name, lambda func=func: _copy(func()))
     monkeypatch.setattr(embeddings, "embed_texts", lambda texts: np.array([[1.0, 0.0, 0.0]], dtype=np.float32))
-    ui.salary_model.clear()
+    main._model_cache.clear()
 
 
 def _copy(value: object) -> object:

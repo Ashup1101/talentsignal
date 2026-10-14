@@ -18,7 +18,7 @@ import pytest
 pytest.importorskip("xgboost")
 pytest.importorskip("mlflow")
 
-from src.app import serving  # noqa: E402
+from src.api import serving  # noqa: E402
 from src.ml import salary_model  # noqa: E402
 from src.ml.features import Profile  # noqa: E402
 from src.ml.salary_model import MedianBaseline, TrainingRow  # noqa: E402

@@ -45,11 +45,13 @@ ml = [
     "mlflow-skinny>=3.17,<4",
     "pdfplumber>=0.11,<0.12",
 ]
-# Phase 6: the Streamlit app. Added to the laptop lock (requirements-ml.txt). The
-# server image uses requirements-app.txt instead (compiled from requirements-app.in):
-# only the app's own imports, none of the pipeline's (dbt, Spark, MLflow, Prophet).
+# Phase 6: the app's API (FastAPI; the frontend is the Next.js project in web/).
+# Added to the laptop lock (requirements-ml.txt). The server image uses
+# requirements-app.txt instead (compiled from requirements-app.in): only the API's
+# own imports, none of the pipeline's (dbt, Spark, MLflow, Prophet).
 app = [
-    "streamlit>=1.65,<2",
+    "fastapi>=0.143,<0.144",
+    "uvicorn>=0.54,<0.55",
     # Reads the posting embeddings Parquet; today it only arrives via PySpark (dev).
     "pyarrow>=25,<26",
 ]
