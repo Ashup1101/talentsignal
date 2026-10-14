@@ -3,9 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "./api";
 
 function respond(status: number, body: unknown) {
-  return vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }),
+  return vi.fn<typeof fetch>(
+    async () => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }),
   );
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { BarChart3 } from "lucide-react";
 import { useState } from "react";
 
 import { LabeledSelect } from "@/components/labeled-select";
@@ -10,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, type SalaryBand } from "@/lib/api";
 import { money, roleLabel } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
+import { cn } from "@/lib/utils";
 
 export function SalariesView() {
   const options = useApi(() => api.options(), []);
@@ -21,7 +23,7 @@ export function SalariesView() {
 
   return (
     <div className="grid gap-8">
-      <PageIntro title="Salary Explorer">
+      <PageIntro title="Salary Explorer" icon={BarChart3} tone="teal">
         Salaries posted in job ads (the midpoint of each posted range, per year) by role, next to the national
         median from the U.S. Bureau of Labor Statistics (BLS).
       </PageIntro>
@@ -51,8 +53,10 @@ export function SalariesView() {
           <Card>
             <CardHeader>
               <CardTitle>Posted salary ranges</CardTitle>
-              <CardDescription>
-                Bar: the middle half of posted salaries (25th–75th percentile). Line: median. Diamond: BLS median.
+              <CardDescription className="flex flex-wrap gap-x-5 gap-y-1">
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-5 rounded-full bg-primary/30" /> middle half of posted salaries (25th–75th percentile)</span>
+                <span className="flex items-center gap-1.5"><span className="h-3 w-0.5 rounded bg-primary" /> median</span>
+                <span className="flex items-center gap-1.5"><span className="size-2.5 rotate-45 bg-chart-3" /> BLS national median</span>
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -119,6 +123,8 @@ export function SalariesView() {
   );
 }
 
+const ROW = "grid grid-cols-[6.5rem_1fr] items-center gap-3 sm:grid-cols-[12rem_1fr]";
+
 /** A bullet-style range chart in plain HTML: crisp, accessible, no chart library needed. */
 export function RangeChart({ bands }: { bands: SalaryBand[] }) {
   const values = bands.flatMap((b) => [b.p25, b.p75, b.bls_median]).filter((v): v is number => typeof v === "number");
@@ -129,22 +135,22 @@ export function RangeChart({ bands }: { bands: SalaryBand[] }) {
   return (
     <div className="grid gap-4" role="img" aria-label="Posted salary ranges by role">
       {bands.map((b) => (
-        <div key={b.role} className="grid grid-cols-[minmax(0,11rem)_1fr] items-center gap-3">
-          <div className="truncate text-sm">{roleLabel(b.role)}</div>
-          <div className="relative h-7 rounded-md bg-muted/50">
+        <div key={b.role} className={ROW}>
+          <div className="text-sm leading-tight font-medium">{roleLabel(b.role)}</div>
+          <div className="relative h-8 rounded-full bg-muted/60">
             {b.p25 !== null && b.p75 !== null && b.p25 !== undefined && b.p75 !== undefined && (
               <div
-                className="absolute top-1 bottom-1 rounded bg-chart-2/70"
+                className="absolute top-1.5 bottom-1.5 rounded-full bg-primary/30"
                 style={{ left: x(b.p25), width: `calc(${x(b.p75)} - ${x(b.p25)})` }}
                 title={`${money(b.p25)} – ${money(b.p75)}`}
               />
             )}
             {typeof b.median === "number" && (
-              <div className="absolute top-0 bottom-0 w-0.5 bg-foreground" style={{ left: x(b.median) }} title={`Median ${money(b.median)}`} />
+              <div className="absolute top-0.5 bottom-0.5 w-1 -translate-x-1/2 rounded-full bg-primary" style={{ left: x(b.median) }} title={`Median ${money(b.median)}`} />
             )}
             {typeof b.bls_median === "number" && (
               <div
-                className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-chart-1 ring-2 ring-background"
+                className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-chart-3 ring-2 ring-card"
                 style={{ left: x(b.bls_median) }}
                 title={`BLS median ${money(b.bls_median)}`}
               />
@@ -152,11 +158,16 @@ export function RangeChart({ bands }: { bands: SalaryBand[] }) {
           </div>
         </div>
       ))}
-      <div className="grid grid-cols-[minmax(0,11rem)_1fr] gap-3">
+      <div className={ROW}>
         <div />
         <div className="relative h-4 text-xs text-muted-foreground">
-          {ticks.map((t) => (
-            <span key={t} className="absolute -translate-x-1/2 tabular-nums" style={{ left: x(t) }}>
+          {ticks.map((t, i) => (
+            // The end labels align inward so they stay inside the card.
+            <span
+              key={t}
+              className={cn("absolute tabular-nums", i === 0 ? "" : i === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2")}
+              style={{ left: x(t) }}
+            >
               ${Math.round(t / 1000)}K
             </span>
           ))}

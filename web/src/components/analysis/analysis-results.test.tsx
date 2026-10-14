@@ -78,15 +78,16 @@ describe("AnalysisResults", () => {
     renderResults(fixture());
 
     expect(screen.getAllByText("$122,000").length).toBeGreaterThan(0);
-    expect(screen.getByText("Posted median, Data Analyst, junior")).toBeInTheDocument();
-    expect(screen.getByText("$79,000 (5 postings)")).toBeInTheDocument();
-    expect(screen.getByText("$115,000")).toBeInTheDocument();
+    const legend = (label: string) => screen.getByText(label).closest("li") as HTMLElement;
+    expect(within(legend("Posted median, Data Analyst, junior (5 postings)")).getByText("$79,000")).toBeInTheDocument();
+    expect(within(legend("Posted median, all Data Analyst postings")).getByText("$115,000")).toBeInTheDocument();
   });
 
   it("asks for a level instead of showing a median that doesn't describe the user", () => {
     renderResults(fixture({ level: "unknown", salary: { ...fixture().salary, level_median: { median: null, n: 0, status: "no_level" } } }));
 
-    expect(screen.getByText("choose your level to see it")).toBeInTheDocument();
+    expect(screen.getByText(/Choose your level to compare/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Posted median, Data Analyst, /)).toBeNull();
   });
 
   it("words missing skills from the API's statuses", () => {
@@ -106,7 +107,9 @@ describe("AnalysisResults", () => {
     expect(screen.getByText(/latest collection \(Oct 3\)/)).toBeInTheDocument();
     const rows = screen.getAllByRole("row").slice(1);
     expect(within(rows[0]).getByText("Data Analyst II")).toBeInTheDocument();
-    expect(within(rows[0]).getByText("Mid-level")).toBeInTheDocument();
+    // The level shows in its own column, and again under the title on phones (CSS picks one).
+    expect(within(rows[0]).getAllByText("Mid-level")).toHaveLength(2);
+    expect(within(rows[0]).getByText("71% match")).toBeInTheDocument();
     expect(within(rows[0]).getByRole("link", { name: /Open the posting/ })).toHaveAttribute("href", "https://jobs.example/a");
     expect(within(rows[1]).queryByRole("link")).toBeNull();
   });
