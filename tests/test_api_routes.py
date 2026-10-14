@@ -182,3 +182,11 @@ def test_openapi_documents_the_pdf_upload(client: TestClient) -> None:
     assert set(params["role"]["examples"]) == set(main.SEARCH_ROLES)
     assert params["level"]["schema"]["enum"][-1] == "unknown"
     assert client.get("/api/docs").status_code == 200
+
+
+def test_committed_openapi_matches_the_api() -> None:
+    # web/openapi.json generates the frontend's TypeScript types; an endpoint change must
+    # be re-exported (python -m src.api.export_openapi && cd web && npm run gen:api).
+    from src.api import export_openapi
+
+    assert export_openapi.OUTPUT.read_text() == export_openapi.render()
