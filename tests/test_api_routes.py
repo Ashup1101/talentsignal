@@ -81,6 +81,8 @@ def test_a_resume_is_analyzed_end_to_end(client: TestClient) -> None:
     salary = body["salary"]
     assert salary["method"] == "model" and salary["low"] <= salary["estimate"] <= salary["high"]
     assert salary["level_median"]["status"] in {"ok", "too_few_salaries"}
+    unsure = _analyze(client, RESUME_PATH.read_bytes()).json()  # level defaults to "unknown"
+    assert unsure["salary"]["level_median"] == {"median": None, "n": 0, "status": "no_level"}
     assert body["missing_skills"] and all(m["model_impact_status"] for m in body["missing_skills"])
     postings = body["postings"]
     assert postings["window"] == "last_7_days" and len(postings["items"]) == 10

@@ -186,8 +186,12 @@ def level_salary(
         min_salaries: Smallest sample worth a median.
 
     Returns:
-        median (dollars or None), n (salaries found), status ('ok' or 'too_few_salaries').
+        median (dollars or None), n (salaries found), status: 'ok', 'too_few_salaries',
+        or 'no_level' when the user isn't sure of their level (postings whose own level
+        is unknown say nothing about the user).
     """
+    if seniority not in LEVEL_RANK:
+        return {"median": None, "n": 0, "status": "no_level"}
     rows = postings_df[
         (postings_df["role_name"] == role)
         & (postings_df["seniority_effective"] == seniority)

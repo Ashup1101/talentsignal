@@ -59,7 +59,7 @@ class CoreSkill(BaseModel):
 class LevelMedian(BaseModel):
     median: float | None
     n: int
-    status: Literal["ok", "too_few_salaries"]
+    status: Literal["ok", "too_few_salaries", "no_level"]
 
 
 class SalaryEstimate(BaseModel):

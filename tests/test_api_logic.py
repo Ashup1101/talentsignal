@@ -337,6 +337,7 @@ def test_level_salary_is_the_posted_median_for_role_and_level() -> None:
 
     assert logic.level_salary(postings, DA, "junior") == {"median": 79_000.0, "n": 5, "status": "ok"}
     assert logic.level_salary(postings, DA, "senior") == {"median": None, "n": 1, "status": "too_few_salaries"}
+    assert logic.level_salary(postings, DA, UNKNOWN) == {"median": None, "n": 0, "status": "no_level"}
 
 
 def test_median_difference_needs_ten_salaries_on_each_side(trained: tuple) -> None:
