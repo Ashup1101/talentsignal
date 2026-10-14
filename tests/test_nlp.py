@@ -78,6 +78,12 @@ def test_posting_rows_shape_and_largest_minimum() -> None:
     assert rows == [("a", 5.0, None, 2, "5+ years", loaded_at), ("b", None, None, 0, None, loaded_at)]
 
 
+def test_embeddings_key_matches_what_the_app_reads() -> None:
+    from src.ml import artifacts
+
+    assert nlp_pipeline.EMBEDDINGS_KEY == artifacts.POSTING_EMBEDDINGS_KEY
+
+
 def test_strip_shared_sentences_removes_text_shared_across_titles() -> None:
     legal = "We are an equal opportunity employer."
     titles = ["data engineer", "data analyst", "ml engineer", "data engineer"]

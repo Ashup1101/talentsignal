@@ -115,7 +115,8 @@ talentsignal/
 │   │   │       ├── mart_salary_bands.sql
 │   │   │       ├── mart_skill_demand.sql
 │   │   │       ├── mart_skill_salary.sql
-│   │   │       └── mart_skill_salary_by_role.sql  # within-role (Phase 5.0)
+│   │   │       ├── mart_skill_salary_by_role.sql  # within-role (Phase 5.0)
+│   │   │       └── mart_role_skill_profile.sql    # demand share + salary per role × skill (Phase 6)
 │   │   ├── seeds/
 │   │   │   └── role_soc_mapping.csv
 │   │   ├── ci/                   # dbt CI: throwaway Postgres on every PR
@@ -137,11 +138,14 @@ talentsignal/
 │   │   ├── topics.py             # BERTopic settings + fit_topics()
 │   │   ├── salary_model.py       # XGBoost regressor + MLflow logging
 │   │   ├── features.py           # resume-derivable features; SAME build_features() for training + app
+│   │   ├── artifacts.py          # S3 keys of the exports the app reads (no imports)
 │   │   ├── demand_forecast.py    # Prophet time-series per role × skill (gated)
 │   │   └── resume_features.py    # pdfplumber text → skills → model features
 │   │
 │   └── app/
 │       ├── streamlit_app.py      # entry point
+│       ├── data.py               # read-only data access: cached RDS queries + S3 loaders (no Streamlit)
+│       ├── db_setup.py           # creates app_reader, the read-only DB user (run once)
 │       └── pages/                # Streamlit orders the sidebar by filename
 │           ├── 01_resume_analyzer.py  # upload resume PDF → skills, match %, salary, gaps
 │           ├── 02_salary_explorer.py
@@ -162,6 +166,8 @@ talentsignal/
 │   ├── test_salary_model.py      # CV, baselines, what-if, MLflow, export (ml CI job)
 │   ├── test_demand_forecast.py   # gate, Prophet forecasts, backtest (ml CI job)
 │   ├── test_resume_features.py   # PDF → text → skills → features (ml CI job)
+│   ├── test_app_data.py          # data.py with a stub DB pool + Stubber S3
+│   ├── test_db_setup.py          # app_reader statements; password only as a parameter
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
@@ -828,6 +834,39 @@ HTTPS) → 7 systemd + nginx (websockets, upload size, rate limit) → 8 CI/CD
 (app tests on PRs; build → GHCR → deploy via OIDC + SSM on merge) → 9
 public smoke test, docs, resume bullet.
 
+Step 2 Status: BUILT (2026-10-13) — data layer.
+- app_reader (src/app/db_setup.py, re-runnable, one transaction): LOGIN,
+  SELECT-only on analytics_staging / _intermediate / _marts and ml; every
+  session read-only by default; statement_timeout 30s; ALTER DEFAULT
+  PRIVILEGES FOR the owner so tables dbt and the ML steps re-create stay
+  readable. Password generated into .env (APP_DB_PASSWORD), passed as a
+  query parameter. On RDS, NOSUPERUSER can't be named by a non-superuser
+  (left out; roles are created without it).
+- Verified as app_reader: reads all 4 schemas, incl. mart_role_skill_profile
+  created by dbt AFTER the setup (default privileges work); raw.* →
+  permission denied; DELETE / CREATE TABLE → read-only transaction.
+- dbt mart_role_skill_profile: per role × skill — n_postings_with_skill,
+  share_of_role_postings, demand_rank (unique per role) + the within-role
+  salary comparison from mart_skill_salary_by_role (salary_sample_status).
+  393 rows; 13–30 skills per role in ≥ 10% of postings (D2's basis).
+  Tests: unique keys, relationship to dim_role, statuses, shares in [0, 1].
+  `dbt build` PASS=106.
+- src/app/data.py (no Streamlit/PyTorch/XGBoost imports): ThreadedConnectionPool
+  (max 4) as app_reader, autocommit SELECTs, broken connections discarded;
+  ttl_cache (1 h, thread-safe, deep copies; nested skills are tuples and
+  embedding rows read-only). postings() (731 × 23: role, location, skills,
+  salary, seniority, topic, apply link), skill_demand(), salary_bands(),
+  job_insights(); S3 via boto3's default credentials (.env keys on the
+  laptop, the instance role on EC2): salary_model_json(),
+  salary_model_card(), posting_embeddings() (+ file metadata in attrs).
+- src/ml/artifacts.py holds the S3 keys; salary_model.py uses it and a
+  test checks nlp_pipeline's embeddings key matches.
+- Real smoke test caught pandas 3 turning NULL topic keywords into NaN
+  (truthy) — fixed and covered by a test.
+- FINDING for Page 4: the 2026-10-13 run (+27 postings) reshuffled the
+  topics: unassigned 47% → 52%, data engineering 109 → 50 postings, noisy
+  topics ("ago", "mcdonalds" keywords). Stabilise before Job Insights.
+
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their
   skills, salary by skill.
@@ -865,6 +904,8 @@ DATABRICKS_HOST=            # Phase 5: Databricks Free Edition workspace URL (ho
 DATABRICKS_TOKEN=           # Phase 5: personal access token for that workspace
 MLFLOW_TRACKING_URI=databricks
 MLFLOW_EXPERIMENT_NAME=     # Phase 5: e.g. /Users/<your email>/talentsignal-salary
+APP_DB_USER=app_reader     # Phase 6: the app's read-only DB user (src/app/db_setup.py)
+APP_DB_PASSWORD=           # Phase 6: random; generated into .env, never printed
 ```
 
 ## What to do if you're blocked

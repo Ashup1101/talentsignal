@@ -30,21 +30,25 @@ class PostgresConfig:
     password: str
 
     @classmethod
-    def from_env(cls) -> PostgresConfig:
-        """Build the config from RDS_* environment variables.
+    def from_env(cls, user_var: str = "RDS_USER", password_var: str = "RDS_PASSWORD") -> PostgresConfig:
+        """Build the config from environment variables.
+
+        Args:
+            user_var: Variable holding the user name (the app uses APP_DB_USER).
+            password_var: Variable holding that user's password.
 
         Returns:
-            A PostgresConfig.
+            A PostgresConfig for RDS_HOST / RDS_PORT / RDS_DB.
 
         Raises:
-            ValueError: If any RDS_* variable is unset.
+            ValueError: If any of the variables is unset.
         """
         return cls(
             host=require_env("RDS_HOST"),
             port=int(require_env("RDS_PORT")),
             database=require_env("RDS_DB"),
-            user=require_env("RDS_USER"),
-            password=require_env("RDS_PASSWORD"),
+            user=require_env(user_var),
+            password=require_env(password_var),
         )
 
     @property
@@ -55,21 +59,29 @@ class PostgresConfig:
             "?sslmode=require&reWriteBatchedInserts=true"
         )
 
+    def connect_kwargs(self) -> dict[str, object]:
+        """psycopg2 connection arguments (TLS required), e.g. for a connection pool.
+
+        Returns:
+            Keyword arguments for psycopg2.connect.
+        """
+        return {
+            "host": self.host,
+            "port": self.port,
+            "dbname": self.database,
+            "user": self.user,
+            "password": self.password,
+            "sslmode": "require",
+            "connect_timeout": 10,
+        }
+
     def connect(self) -> psycopg2.extensions.connection:
         """Open a TLS-encrypted psycopg2 connection.
 
         Returns:
             An open connection; the caller closes it.
         """
-        return psycopg2.connect(
-            host=self.host,
-            port=self.port,
-            dbname=self.database,
-            user=self.user,
-            password=self.password,
-            sslmode="require",
-            connect_timeout=10,
-        )
+        return psycopg2.connect(**self.connect_kwargs())
 
 
 def replace_tables(
