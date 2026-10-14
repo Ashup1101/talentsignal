@@ -36,6 +36,7 @@ from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from xgboost import XGBRegressor
 
 from src.ingestion.s3_utils import require_env, upload_bytes
+from src.ml.artifacts import SALARY_CARD_KEY, SALARY_MODEL_KEY
 from src.ml.features import FeatureSpec, Profile, build_features, fit_spec
 from src.processing.postgres import PostgresConfig
 
@@ -63,7 +64,6 @@ MIN_GROUP_SALARIES = 3
 # mention (the same floor as mart_skill_salary_by_role).
 MIN_WHAT_IF_POSTINGS = 5
 METHODS = ("model", "global_median", "role_median", "role_seniority_median")
-MODEL_PREFIX = "models/salary"
 
 
 @dataclass(frozen=True)
@@ -362,7 +362,7 @@ def export_to_s3(bucket: str, model: XGBRegressor, card: dict) -> list[str]:
     Returns:
         The S3 keys written.
     """
-    model_key, card_key = f"{MODEL_PREFIX}/model.json", f"{MODEL_PREFIX}/feature_spec.json"
+    model_key, card_key = SALARY_MODEL_KEY, SALARY_CARD_KEY
     upload_bytes(bucket, model_key, bytes(model.get_booster().save_raw("json")), "application/json")
     upload_bytes(bucket, card_key, json.dumps(card, indent=2).encode(), "application/json")
     return [model_key, card_key]

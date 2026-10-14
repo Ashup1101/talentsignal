@@ -68,6 +68,35 @@ models:
               arguments:
                 values: [ok, too_few_to_report]
 
+  - name: mart_role_skill_profile
+    description: >
+      Per role × skill: share of the role's postings that mention the skill and its
+      demand rank (feeds the app's match % and missing-skill picks), plus the
+      within-role salary comparison from mart_skill_salary_by_role (association,
+      not causation; empty when either side has too few salaries).
+    data_tests:
+      - unique:
+          column_name: "role_name || '|' || skill_name"
+      - unique:
+          column_name: "role_name || '|' || demand_rank"
+    columns:
+      - name: role_name
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_role')
+                field: role_name
+      - name: skill_name
+        data_tests: [not_null]
+      - name: demand_rank
+        data_tests: [not_null]
+      - name: salary_sample_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [ok, too_few_to_report]
+
   - name: mart_skill_salary_by_role
     description: >
       Within-role median salary with vs without each skill (association, not
