@@ -157,7 +157,12 @@ talentsignal/
 │       ├── serving.py            # salary model: load from JSON (1 thread), predict, what-if
 │       └── logic.py              # match %, missing skills, salary + level median, matching
 │
-├── web/                          # Next.js frontend (static export), Phase 6 — next PR
+├── web/                          # Next.js frontend (static export → out/), Phase 6
+│   ├── openapi.json              # the API's OpenAPI (python -m src.api.export_openapi)
+│   ├── src/app/                  # pages: /, /analyze/, /salaries/, /skills/, /insights/
+│   ├── src/components/           # page views; ui/ = shadcn components (Base UI)
+│   ├── src/lib/                  # api.ts (typed client), api-types.ts (generated), format.ts, use-api.ts
+│   └── public/sample-resume.pdf  # = tests/fixtures/resume_sample.pdf (made up)
 │
 ├── tests/
 │   ├── test_ingestion.py
@@ -851,6 +856,8 @@ locally → 5 Docker image + compose (nginx) → 6 AWS after cost confirmation
 HTTPS) → 7 systemd + nginx (websockets, upload size, rate limit) → 8 CI/CD
 (app tests on PRs; build → GHCR → deploy via OIDC + SSM on merge) → 9
 public smoke test, docs, resume bullet.
+(Revised 2026-10-14: step 4 = FastAPI API + Next.js static frontend in web/; step 5's
+image runs the API, and nginx serves web/out/ and proxies /api/.)
 
 Step 2 Status: BUILT (2026-10-13) — data layer.
 - app_reader (src/app/db_setup.py, re-runnable, one transaction): LOGIN,
@@ -996,6 +1003,48 @@ API Status: BUILT (2026-10-14) — Streamlit → FastAPI (PR B adds the Next.js 
 - Follow-ups: Starlette deprecates httpx for TestClient (install httpx2
   when it stops working); retrain the salary model to weigh level (fix 1
   only shows the gap).
+
+Frontend Status: BUILT (2026-10-14) — web/ (PR B).
+- Next.js 16.4 (App Router, Turbopack), React 19.3, TypeScript 5, Tailwind 4,
+  shadcn/ui 4.21 ("base-nova" style on Base UI primitives, not Radix),
+  Recharts 3, Lucide 1.56; scaffolded with create-next-app 16.4.
+- Static export: output "export", trailingSlash (each page = a folder with
+  index.html, no nginx rewrites), images.unoptimized; create-next-app's
+  cacheComponents / partialPrefetching removed (they need a Node server).
+  All data is fetched in the browser; NEXT_PUBLIC_API_BASE is empty in
+  production (same origin, nginx proxies /api) and http://localhost:8000
+  in web/.env.development (committed; un-ignored in web/.gitignore).
+- Pages: Home (overview KPIs, pipeline status, links, how it works);
+  Resume Analyzer (drop zone with client-side PDF/size checks, role / level
+  / state / remote — changing them re-runs on the same file, "Try a sample
+  resume", results: KPIs, match by role, salary vs posted medians for the
+  level and the role, skills found, core-skill coverage, 3 skills to add
+  worded from the API's statuses, matching postings with level badges and
+  apply links); Salary Explorer (level/state filters, a plain-HTML range
+  chart p25–p75 + median + BLS, table, too-few note); Skill Demand (top-12
+  bar chart, ranked table, forecast progress, Prophet chart once a series
+  qualifies); Job Insights (topic cards, role mix and level mix stacked
+  charts, remote share).
+- Types can't drift: src/api/export_openapi.py writes web/openapi.json;
+  `npm run gen:api` (openapi-typescript) writes src/lib/api-types.ts.
+  test_api_routes.py fails if openapi.json is stale; the CI web job fails
+  if api-types.ts is.
+- Tests (Vitest 5 + Testing Library): format rules, the API client (raw PDF
+  body, query string, error mapping), the results view, the range chart —
+  16 pass. happy-dom, not jsdom: jsdom 27 needs require(esm) (Node ≥ 20.19 /
+  22.12) and the laptop runs Node 20.17.
+- CI job "Web": Node 24 LTS, npm ci, lint, type-check, generated types
+  current, tests, static build; NEXT_TELEMETRY_DISABLED=1.
+- npm audit: the shipped dependencies have 0 known vulnerabilities (the
+  shadcn CLI moved to devDependencies: only its CSS is used, at build time).
+  9 "high" remain in dev tooling (shadcn CLI, eslint-config-next) via one
+  braces advisory with no patched release; `npm audit fix --force` would
+  downgrade eslint-config-next to v14 — not done. Recheck later.
+- Local machine: Node 20.17 is the x86-64 build under Rosetta (slower) and
+  past end of life (2026-04); upgrading to arm64 Node 24 LTS is recommended
+  (the user's call). The dev server binds 127.0.0.1 (it was on the LAN);
+  infra/api/run_local.sh allows both localhost:3000 and 127.0.0.1:3000.
+- web/AGENTS.md is written by Next.js itself (bundled-docs pointer); kept.
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their

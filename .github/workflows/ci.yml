@@ -189,3 +189,45 @@ jobs:
 
       - name: API tests
         run: pytest -q tests/test_api_routes.py tests/test_api_logic.py tests/test_api_data.py tests/test_db_setup.py
+
+  web:
+    name: Web (lint, types, tests, static build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      # Node 24 LTS: what the frontend is built with (Node 20 reached end of life 2026-04).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      # The committed types must match web/openapi.json (python -m src.api.export_openapi
+      # keeps that file in step with the API; test_api_routes.py checks it).
+      - name: API types are up to date
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/lib/api-types.ts
+
+      - name: Tests
+        run: npm test
+
+      # The static export nginx will serve (out/).
+      - name: Build
+        run: npm run build

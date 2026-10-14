@@ -1,0 +1,1472 @@
+{
+  "components": {
+    "schemas": {
+      "Analysis": {
+        "properties": {
+          "core_skills": {
+            "items": {
+              "$ref": "#/components/schemas/CoreSkill"
+            },
+            "title": "Core Skills",
+            "type": "array"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "missing_skills": {
+            "items": {
+              "$ref": "#/components/schemas/MissingSkill"
+            },
+            "title": "Missing Skills",
+            "type": "array"
+          },
+          "postings": {
+            "$ref": "#/components/schemas/MatchingPostings"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "role_matches": {
+            "items": {
+              "$ref": "#/components/schemas/RoleMatch"
+            },
+            "title": "Role Matches",
+            "type": "array"
+          },
+          "salary": {
+            "$ref": "#/components/schemas/SalaryEstimate"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillFound"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "level",
+          "skills",
+          "role_matches",
+          "core_skills",
+          "salary",
+          "missing_skills",
+          "postings"
+        ],
+        "title": "Analysis",
+        "type": "object"
+      },
+      "CoreSkill": {
+        "properties": {
+          "on_resume": {
+            "title": "On Resume",
+            "type": "boolean"
+          },
+          "share_of_role_postings": {
+            "title": "Share Of Role Postings",
+            "type": "number"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill",
+          "share_of_role_postings",
+          "on_resume"
+        ],
+        "title": "CoreSkill",
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "code"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
+      "Forecast": {
+        "properties": {
+          "forecast": {
+            "items": {
+              "$ref": "#/components/schemas/ForecastPoint"
+            },
+            "title": "Forecast",
+            "type": "array"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/WeeklyShare"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "forecast",
+              "insufficient_history"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "skill",
+          "status",
+          "history",
+          "forecast"
+        ],
+        "title": "Forecast",
+        "type": "object"
+      },
+      "ForecastPoint": {
+        "properties": {
+          "lower": {
+            "title": "Lower",
+            "type": "number"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "upper": {
+            "title": "Upper",
+            "type": "number"
+          },
+          "week": {
+            "format": "date",
+            "title": "Week",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week",
+          "share",
+          "lower",
+          "upper"
+        ],
+        "title": "ForecastPoint",
+        "type": "object"
+      },
+      "ForecastStatus": {
+        "properties": {
+          "forecasting_skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Forecasting Skills",
+            "type": "array"
+          },
+          "weeks_needed": {
+            "title": "Weeks Needed",
+            "type": "integer"
+          },
+          "weeks_observed": {
+            "title": "Weeks Observed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "weeks_observed",
+          "weeks_needed",
+          "forecasting_skills"
+        ],
+        "title": "ForecastStatus",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Insights": {
+        "properties": {
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LevelCount"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "remote": {
+            "items": {
+              "$ref": "#/components/schemas/RemoteShare"
+            },
+            "title": "Remote",
+            "type": "array"
+          },
+          "remote_share_all": {
+            "title": "Remote Share All",
+            "type": "number"
+          },
+          "role_mix": {
+            "items": {
+              "$ref": "#/components/schemas/TopicRole"
+            },
+            "title": "Role Mix",
+            "type": "array"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/Topic"
+            },
+            "title": "Topics",
+            "type": "array"
+          },
+          "unassigned_share": {
+            "title": "Unassigned Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "unassigned_share",
+          "topics",
+          "role_mix",
+          "levels",
+          "remote",
+          "remote_share_all"
+        ],
+        "title": "Insights",
+        "type": "object"
+      },
+      "Level": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "Level",
+        "type": "object"
+      },
+      "LevelCount": {
+        "properties": {
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "n_postings": {
+            "title": "N Postings",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "level",
+          "n_postings"
+        ],
+        "title": "LevelCount",
+        "type": "object"
+      },
+      "LevelMedian": {
+        "properties": {
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "too_few_salaries",
+              "no_level"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "median",
+          "n",
+          "status"
+        ],
+        "title": "LevelMedian",
+        "type": "object"
+      },
+      "MatchingPosting": {
+        "properties": {
+          "apply_link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Link"
+          },
+          "employer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "near_level": {
+            "title": "Near Level",
+            "type": "boolean"
+          },
+          "remote": {
+            "title": "Remote",
+            "type": "boolean"
+          },
+          "salary": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Salary"
+          },
+          "shared_skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared Skills",
+            "type": "array"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "title",
+          "employer",
+          "location",
+          "remote",
+          "level",
+          "near_level",
+          "similarity",
+          "shared_skills",
+          "salary",
+          "apply_link"
+        ],
+        "title": "MatchingPosting",
+        "type": "object"
+      },
+      "MatchingPostings": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MatchingPosting"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "window": {
+            "enum": [
+              "last_7_days",
+              "latest_collection",
+              "none"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "since",
+          "items"
+        ],
+        "title": "MatchingPostings",
+        "type": "object"
+      },
+      "MissingSkill": {
+        "properties": {
+          "demand_rank": {
+            "title": "Demand Rank",
+            "type": "integer"
+          },
+          "median_difference_status": {
+            "enum": [
+              "ok",
+              "too_few_salaries"
+            ],
+            "title": "Median Difference Status",
+            "type": "string"
+          },
+          "median_salary_difference": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Salary Difference"
+          },
+          "model_impact": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Impact"
+          },
+          "model_impact_status": {
+            "enum": [
+              "value",
+              "no_measurable_effect",
+              "not_enough_data"
+            ],
+            "title": "Model Impact Status",
+            "type": "string"
+          },
+          "n_salaried_with_skill": {
+            "title": "N Salaried With Skill",
+            "type": "integer"
+          },
+          "n_salaried_without_skill": {
+            "title": "N Salaried Without Skill",
+            "type": "integer"
+          },
+          "share_of_role_postings": {
+            "title": "Share Of Role Postings",
+            "type": "number"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          },
+          "skill_category": {
+            "title": "Skill Category",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill",
+          "skill_category",
+          "share_of_role_postings",
+          "demand_rank",
+          "model_impact",
+          "model_impact_status",
+          "median_salary_difference",
+          "median_difference_status",
+          "n_salaried_with_skill",
+          "n_salaried_without_skill"
+        ],
+        "title": "MissingSkill",
+        "type": "object"
+      },
+      "Options": {
+        "properties": {
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/Level"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "max_upload_mb": {
+            "title": "Max Upload Mb",
+            "type": "integer"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "states": {
+            "items": {
+              "type": "string"
+            },
+            "title": "States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roles",
+          "levels",
+          "states",
+          "max_upload_mb"
+        ],
+        "title": "Options",
+        "type": "object"
+      },
+      "Overview": {
+        "properties": {
+          "forecast_weeks_needed": {
+            "title": "Forecast Weeks Needed",
+            "type": "integer"
+          },
+          "forecast_weeks_observed": {
+            "title": "Forecast Weeks Observed",
+            "type": "integer"
+          },
+          "model_trained_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Trained At"
+          },
+          "model_typical_error": {
+            "title": "Model Typical Error",
+            "type": "number"
+          },
+          "model_used": {
+            "title": "Model Used",
+            "type": "boolean"
+          },
+          "n_last_7_days": {
+            "title": "N Last 7 Days",
+            "type": "integer"
+          },
+          "n_postings": {
+            "title": "N Postings",
+            "type": "integer"
+          },
+          "n_salaried": {
+            "title": "N Salaried",
+            "type": "integer"
+          },
+          "newest_collection": {
+            "format": "date-time",
+            "title": "Newest Collection",
+            "type": "string"
+          },
+          "pipeline_current": {
+            "title": "Pipeline Current",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "n_postings",
+          "n_salaried",
+          "newest_collection",
+          "n_last_7_days",
+          "pipeline_current",
+          "model_typical_error",
+          "model_used",
+          "model_trained_at",
+          "forecast_weeks_observed",
+          "forecast_weeks_needed"
+        ],
+        "title": "Overview",
+        "type": "object"
+      },
+      "RankedSkill": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "postings": {
+            "title": "Postings",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "share_of_postings": {
+            "title": "Share Of Postings",
+            "type": "number"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rank",
+          "skill",
+          "category",
+          "share_of_postings",
+          "postings"
+        ],
+        "title": "RankedSkill",
+        "type": "object"
+      },
+      "RemoteShare": {
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "role",
+          "share"
+        ],
+        "title": "RemoteShare",
+        "type": "object"
+      },
+      "RoleMatch": {
+        "properties": {
+          "match": {
+            "title": "Match",
+            "type": "number"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "match"
+        ],
+        "title": "RoleMatch",
+        "type": "object"
+      },
+      "SalaryBand": {
+        "properties": {
+          "bls_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bls Median"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "median_vs_bls": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Vs Bls"
+          },
+          "n_salaries": {
+            "title": "N Salaries",
+            "type": "integer"
+          },
+          "p25": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P25"
+          },
+          "p75": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P75"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "too_few_to_report"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "n_salaries",
+          "p25",
+          "median",
+          "p75",
+          "bls_median",
+          "median_vs_bls",
+          "status"
+        ],
+        "title": "SalaryBand",
+        "type": "object"
+      },
+      "SalaryEstimate": {
+        "properties": {
+          "estimate": {
+            "title": "Estimate",
+            "type": "number"
+          },
+          "high": {
+            "title": "High",
+            "type": "number"
+          },
+          "level_median": {
+            "$ref": "#/components/schemas/LevelMedian"
+          },
+          "low": {
+            "title": "Low",
+            "type": "number"
+          },
+          "method": {
+            "enum": [
+              "model",
+              "role_median"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "model_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Run Id"
+          },
+          "role_median": {
+            "title": "Role Median",
+            "type": "number"
+          },
+          "typical_error": {
+            "title": "Typical Error",
+            "type": "number"
+          }
+        },
+        "required": [
+          "estimate",
+          "low",
+          "high",
+          "typical_error",
+          "method",
+          "role_median",
+          "level_median",
+          "model_run_id"
+        ],
+        "title": "SalaryEstimate",
+        "type": "object"
+      },
+      "SkillDemand": {
+        "properties": {
+          "forecast": {
+            "$ref": "#/components/schemas/ForecastStatus"
+          },
+          "n_role_postings": {
+            "title": "N Role Postings",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/RankedSkill"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "n_role_postings",
+          "skills",
+          "forecast"
+        ],
+        "title": "SkillDemand",
+        "type": "object"
+      },
+      "SkillFound": {
+        "properties": {
+          "demand_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demand Rank"
+          },
+          "share_of_role_postings": {
+            "title": "Share Of Role Postings",
+            "type": "number"
+          },
+          "skill": {
+            "title": "Skill",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill",
+          "share_of_role_postings",
+          "demand_rank"
+        ],
+        "title": "SkillFound",
+        "type": "object"
+      },
+      "Topic": {
+        "properties": {
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "n_postings": {
+            "title": "N Postings",
+            "type": "integer"
+          },
+          "share_of_postings": {
+            "title": "Share Of Postings",
+            "type": "number"
+          },
+          "topic_id": {
+            "title": "Topic Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "topic_id",
+          "label",
+          "n_postings",
+          "share_of_postings",
+          "keywords"
+        ],
+        "title": "Topic",
+        "type": "object"
+      },
+      "TopicRole": {
+        "properties": {
+          "n_postings": {
+            "title": "N Postings",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "share_of_topic": {
+            "title": "Share Of Topic",
+            "type": "number"
+          },
+          "topic_id": {
+            "title": "Topic Id",
+            "type": "integer"
+          },
+          "topic_label": {
+            "title": "Topic Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic_id",
+          "topic_label",
+          "role",
+          "n_postings",
+          "share_of_topic"
+        ],
+        "title": "TopicRole",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WeeklyShare": {
+        "properties": {
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "week": {
+            "format": "date",
+            "title": "Week",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week",
+          "share"
+        ],
+        "title": "WeeklyShare",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "summary": "How a resume compares with real job postings.",
+    "title": "TalentSignal API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/analyze": {
+      "post": {
+        "description": "Analyze a resume PDF (the raw request body) against real postings for a target role.\n\nThe PDF is read in memory, never stored or logged; the response never includes its text.",
+        "operationId": "analyze_api_analyze_post",
+        "parameters": [
+          {
+            "description": "Target role (see /api/options)",
+            "examples": {
+              "data analyst": {
+                "value": "data analyst"
+              },
+              "data engineer": {
+                "value": "data engineer"
+              },
+              "data scientist": {
+                "value": "data scientist"
+              },
+              "machine learning engineer": {
+                "value": "machine learning engineer"
+              },
+              "software engineer": {
+                "value": "software engineer"
+              }
+            },
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "description": "Target role (see /api/options)",
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The user's level (see /api/options)",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "default": "unknown",
+              "description": "The user's level (see /api/options)",
+              "enum": [
+                "intern",
+                "junior",
+                "mid",
+                "senior",
+                "staff_plus",
+                "manager",
+                "unknown"
+              ],
+              "title": "Level",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Two-letter state, or omit",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Two-letter state, or omit",
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "remote",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Remote",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "contentMediaType": "application/pdf",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The resume as a PDF file (max 5 MB).",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Analysis"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Analyze"
+      }
+    },
+    "/api/forecast": {
+      "get": {
+        "description": "Weekly demand share for one role \u00d7 skill, plus Prophet's forecast once it has enough weeks.",
+        "operationId": "forecast_api_forecast_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skill",
+            "required": true,
+            "schema": {
+              "title": "Skill",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forecast"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Forecast"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "description": "Liveness probe: the process is up (no database or S3 call).",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Api Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/insights": {
+      "get": {
+        "description": "Topics found in the postings, the roles behind each, level mix and remote share.",
+        "operationId": "insights_api_insights_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Insights"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Insights"
+      }
+    },
+    "/api/options": {
+      "get": {
+        "description": "Choices for the Resume Analyzer form: roles, levels and states the model knows.",
+        "operationId": "options_api_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Options"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Options"
+      }
+    },
+    "/api/overview": {
+      "get": {
+        "description": "How much data there is and how fresh it is.",
+        "operationId": "overview_api_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview"
+      }
+    },
+    "/api/salaries": {
+      "get": {
+        "description": "Posted-salary percentiles per role for a level / state slice, next to the BLS median.",
+        "operationId": "salaries_api_salaries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SalaryBand"
+                  },
+                  "title": "Response Salaries Api Salaries Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Salaries"
+      }
+    },
+    "/api/skills": {
+      "get": {
+        "description": "The skills a role's postings ask for, ranked, and the demand forecast's progress.",
+        "operationId": "skills_api_skills_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "title": "Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDemand"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skills"
+      }
+    }
+  }
+}
