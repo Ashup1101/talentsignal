@@ -259,3 +259,48 @@ def test_app_survives_pytorch_and_xgboost_in_one_process() -> None:
 
     assert result.returncode == 0, f"exit {result.returncode}: {result.stderr[-500:]}"
     assert result.stdout.strip().splitlines()[-1] == "1"
+
+
+# --- Salary Explorer and Job Insights helpers -------------------------------------------
+
+
+def _salaries() -> pd.DataFrame:
+    rows = [(DE, "senior", "NY", 100_000.0 + 10_000 * i) for i in range(6)]  # 100K … 150K
+    rows += [(DE, "junior", "CA", 80_000.0), (DA, "senior", "NY", 90_000.0), (DA, "senior", "NY", None)]
+    return pd.DataFrame(rows, columns=["role_name", "seniority_effective", "state_code", "salary_mid_annual"])
+
+
+BLS = pd.DataFrame({"role_name": [DE, DA], "bls_median_annual_wage": [120_000.0, None]})
+
+
+def test_salary_bands_match_percentile_cont_and_compare_with_bls() -> None:
+    bands = logic.salary_bands_for(_salaries(), BLS).set_index("role_name")
+
+    de = bands.loc[DE]
+    assert de["n_salaries"] == 7 and de["sample_status"] == "ok"
+    assert (de["salary_p25"], de["salary_median"], de["salary_p75"]) == (105_000.0, 120_000.0, 135_000.0)
+    assert de["median_vs_bls_pct"] == pytest.approx(0.0)
+    assert bands.loc[DA, "sample_status"] == "too_few_to_report" and pd.isna(bands.loc[DA, "salary_median"])
+
+
+def test_salary_band_filters_narrow_the_sample() -> None:
+    senior_ny = logic.salary_bands_for(_salaries(), BLS, seniority="senior", state="NY").set_index("role_name")
+    junior = logic.salary_bands_for(_salaries(), BLS, seniority="junior").set_index("role_name")
+
+    assert senior_ny.loc[DE, "n_salaries"] == 6 and senior_ny.loc[DE, "salary_median"] == 125_000.0
+    assert junior.loc[DE, "n_salaries"] == 1 and junior.loc[DE, "sample_status"] == "too_few_to_report"
+
+
+def test_topic_role_mix_shares_each_topics_postings_across_roles() -> None:
+    postings = pd.DataFrame(
+        {
+            "topic_id": [0, 0, 0, 1, -1, None],
+            "topic_label": ["pipelines", "pipelines", "pipelines", "dashboards", "unassigned", None],
+            "role_name": [DE, DE, DA, DA, DE, DE],
+        }
+    )
+
+    mix = logic.topic_role_mix(postings)
+
+    assert mix[["topic_id", "role_name", "n_postings"]].values.tolist() == [[0, DE, 2], [0, DA, 1], [1, DA, 1]]
+    assert mix["share_of_topic"].round(3).tolist() == [0.667, 0.333, 1.0]

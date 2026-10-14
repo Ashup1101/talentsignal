@@ -269,3 +269,72 @@ def match_postings(
     frame = frame.sort_values(["similarity", "job_id"], ascending=[False, True]).head(top_n).reset_index(drop=True)
     frame.attrs = {"window": window, "since": recent["fetched_at"].min().date()}
     return frame
+
+
+def salary_bands_for(
+    postings_df: pd.DataFrame,
+    bls_df: pd.DataFrame,
+    seniority: str | None = None,
+    state: str | None = None,
+    min_salaries: int = 5,
+) -> pd.DataFrame:
+    """Posted-salary percentiles per role for a seniority / state slice, next to BLS.
+
+    Percentiles interpolate linearly, like dbt's percentile_cont, so with no filters
+    they equal mart_salary_bands. Fewer than min_salaries salaries (dbt's
+    min_salary_sample) → no percentiles, status 'too_few_to_report'.
+
+    Args:
+        postings_df: data.postings().
+        bls_df: data.salary_bands() (for each role's BLS median).
+        seniority: seniority_effective to keep, or None for all.
+        state: Two-letter state to keep, or None for all.
+        min_salaries: Smallest sample worth reporting.
+
+    Returns:
+        One row per role in bls_df: n_salaries, salary_p25, salary_median, salary_p75,
+        bls_median, median_vs_bls_pct, sample_status.
+    """
+    salaried = postings_df[postings_df["salary_mid_annual"].notna()]
+    if seniority is not None:
+        salaried = salaried[salaried["seniority_effective"] == seniority]
+    if state is not None:
+        salaried = salaried[salaried["state_code"] == state]
+    rows = []
+    for band in bls_df.itertuples():
+        values = salaried.loc[salaried["role_name"] == band.role_name, "salary_mid_annual"].astype(float)
+        enough = len(values) >= min_salaries
+        p25, median, p75 = (values.quantile([0.25, 0.5, 0.75]).tolist() if enough else (None, None, None))
+        bls = _optional(band.bls_median_annual_wage)
+        rows.append(
+            {
+                "role_name": band.role_name,
+                "n_salaries": len(values),
+                "salary_p25": p25,
+                "salary_median": median,
+                "salary_p75": p75,
+                "bls_median": bls,
+                "median_vs_bls_pct": (median / bls - 1) if median is not None and bls else None,
+                "sample_status": "ok" if enough else "too_few_to_report",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def topic_role_mix(postings_df: pd.DataFrame) -> pd.DataFrame:
+    """How each topic's postings split across the search roles.
+
+    Args:
+        postings_df: data.postings() (topic_id -1 = no topic; missing = not processed).
+
+    Returns:
+        One row per (topic, role): topic_id, topic_label, role_name, n_postings and
+        share_of_topic; postings in no topic are left out.
+    """
+    topical = postings_df[postings_df["topic_id"].notna() & (postings_df["topic_id"] >= 0)]
+    counts = (
+        topical.groupby(["topic_id", "topic_label", "role_name"]).size().rename("n_postings").reset_index()
+    )
+    counts["topic_id"] = counts["topic_id"].astype(int)
+    counts["share_of_topic"] = counts["n_postings"] / counts.groupby("topic_id")["n_postings"].transform("sum")
+    return counts.sort_values(["topic_id", "n_postings"], ascending=[True, False]).reset_index(drop=True)
