@@ -66,12 +66,15 @@ talentsignal/
 ├── README.md
 ├── pyproject.toml
 ├── .gitignore
+├── .streamlit/config.toml        # app: 5 MB uploads, no usage stats, no error details for visitors
 │
 ├── infra/
 │   ├── terraform/                # S3 buckets, RDS, EC2 (scaffold only for now)
 │   ├── airflow/
 │   │   ├── install.sh            # creates .venv-airflow: Airflow 3 + constraints
 │   │   └── run_local.sh          # env vars + `airflow standalone` (UI :8080)
+│   ├── app/
+│   │   └── run_local.sh          # the Streamlit app on localhost:8501
 │   └── docker-compose.yml        # Phase 6 app containers (not used for Airflow)
 │
 ├── src/
@@ -149,11 +152,14 @@ talentsignal/
 │       ├── __init__.py           # pins OMP_NUM_THREADS=1 (PyTorch + XGBoost in one process)
 │       ├── serving.py            # salary model: load from JSON (1 thread), predict, what-if
 │       ├── logic.py              # match %, missing skills, salary + range, posting matching
+│       ├── formatting.py         # wording/rounding rules ("no measurable effect"), no Streamlit
+│       ├── ui.py                 # shared page setup, cached model, friendly load errors
+│       ├── assets/sample_resume.pdf  # = tests/fixtures/resume_sample.pdf (made up)
 │       └── pages/                # Streamlit orders the sidebar by filename
 │           ├── 01_resume_analyzer.py  # upload resume PDF → skills, match %, salary, gaps
-│           ├── 02_salary_explorer.py
-│           ├── 03_skill_demand.py     # Skill Demand Forecast (Prophet)
-│           └── 04_job_insights.py
+│           ├── 02_salary_explorer.py  # percentiles by level/state vs BLS
+│           ├── 03_skill_demand.py     # demand ranks + forecast status (Prophet)
+│           └── 04_job_insights.py     # topics, role mix, seniority, remote
 │
 ├── tests/
 │   ├── test_ingestion.py
@@ -172,6 +178,9 @@ talentsignal/
 │   ├── test_app_data.py          # data.py with a stub DB pool + Stubber S3
 │   ├── test_db_setup.py          # app_reader statements; password only as a parameter
 │   ├── test_app_logic.py         # logic + serving on stub data; OpenMP regression (ml CI job)
+│   ├── test_app_formatting.py    # wording and rounding rules
+│   ├── test_app_pages.py         # Streamlit AppTest of all five pages (ml CI job)
+│   ├── app_stubs.py              # stub data + tiny XGBoost model for the page tests
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
@@ -902,6 +911,40 @@ Step 3 Status: BUILT (2026-10-13) — app logic as tested pure functions.
 - For the page: the model's what-if is often ~$0 (shallow trees rarely
   split on those skills) while within-role medians differ by thousands —
   word $0 as "no measurable effect in the model".
+
+Step 4 Status: BUILT (2026-10-13) — the five pages.
+- Pages run as separate scripts (pages/ folder) and each starts with
+  `from src.app import ui` (pins OMP_NUM_THREADS first). Home: overview,
+  links, data freshness (postings, newest collection age, last 7 days,
+  model MAE; warning when > 2 days old). Resume Analyzer: upload or "Try a
+  sample resume" (made-up PDF), target role / level / state / remote →
+  skills found with their share of the role's postings, match % for all
+  roles + the core skills that counted, salary ± role CV MAE next to the
+  role median, top 3 missing skills (model what-if + within-role median
+  with n), top 10 matching postings with apply links and which window was
+  used. Salary Explorer: percentiles by level / state (< 5 → too few) vs
+  BLS (chart + table). Skill Demand: ranked skills, progress toward 12
+  weekly collections, forecast chart once a series qualifies. Job
+  Insights: topics with keywords and unassigned share, role mix heatmap,
+  level mix, remote share.
+- Wording: money to the nearest $1,000, half up (Python's round() is
+  half-even: $14,500 showed as $14,000); a what-if under $500 reads "no
+  measurable effect"; missing numbers (None or NaN) read "—" — the
+  real-data check had silently shown "$nan" for data analyst's BLS median.
+- Privacy: the resume is read from the upload in memory, never cached
+  (no st.cache on resume data), saved or logged; .streamlit/config.toml
+  caps uploads at 5 MB, turns off usage stats and hides error details
+  from visitors (showErrorDetails = "none"; AppTest sees the redacted
+  message too).
+- Tests: AppTest drives every page on stub data (tests/app_stubs.py: no
+  DB, S3 or embedding model; tiny real XGBoost): real uploads of the
+  fixture PDF, a scanned (no-text) PDF, a non-PDF, the sample button, a
+  role with no recent postings, filters down to "too few", the forecast
+  chart branch, and the $0 → "no measurable effect" wording. Plus
+  formatting and the salary-band / topic-mix helpers.
+- Real data: every page renders with no exceptions or errors (AppTest
+  against RDS + S3). Run locally: infra/app/run_local.sh →
+  http://localhost:8501 (localhost only).
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their

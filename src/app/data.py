@@ -165,6 +165,32 @@ def salary_bands() -> pd.DataFrame:
 
 
 @ttl_cache(CACHE_SECONDS)
+def skill_demand_history() -> pd.DataFrame:
+    """Per collection week × role × skill: share of the role's collected postings mentioning it.
+
+    Returns:
+        analytics_marts.mart_skill_demand (weeks the role wasn't sampled are absent).
+    """
+    return _query(
+        "select * from analytics_marts.mart_skill_demand order by search_role, skill_name, collection_week"
+    )
+
+
+@ttl_cache(CACHE_SECONDS)
+def skill_demand_forecast() -> pd.DataFrame:
+    """Per role × skill: the forecast gate's verdict and, once enough weeks, Prophet forecasts.
+
+    Returns:
+        analytics_staging.stg_skill_demand_forecast (forecast_status, observed_weeks,
+        last observed share, forecast_week / share_forecast / share_lower / share_upper).
+    """
+    return _query(
+        "select * from analytics_staging.stg_skill_demand_forecast"
+        " order by search_role, skill_name, forecast_week"
+    )
+
+
+@ttl_cache(CACHE_SECONDS)
 def job_insights() -> pd.DataFrame:
     """BERTopic topics with their sizes and keywords.
 

@@ -1,0 +1,32 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 389 >>
+stream
+BT /F1 11 Tf 14 TL 72 740 Td (Alex Example) Tj T* (Data Engineer | Austin, TX) Tj T* (Skills: Python, SQL, Apache Spark, Airflow, AWS, dbt, Docker) Tj T* (Experience) Tj T* (Data Engineer, Example Corp \(2021-2025\): built batch pipelines in PySpark on AWS,) Tj T* (orchestrated with Airflow; modeled analytics marts in dbt on PostgreSQL.) Tj T* (Education: B.S. Computer Science) Tj T* ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+751
+%%EOF

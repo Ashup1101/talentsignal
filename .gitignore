@@ -47,3 +47,6 @@ mlruns/
 # Airflow (Phase 4): its own virtualenv and AIRFLOW_HOME (config, logs, SQLite DB)
 .venv-airflow/
 .airflow/
+
+# Streamlit secrets (the app reads .env / the environment instead; never commit secrets)
+.streamlit/secrets.toml

@@ -28,6 +28,7 @@ from src.ml import artifacts
 
 CACHED = (
     data.postings, data.skill_demand, data.salary_bands, data.job_insights,
+    data.skill_demand_history, data.skill_demand_forecast,
     data.salary_model_json, data.salary_model_card, data.posting_embeddings,
 )
 BUCKET = "test-curated"
@@ -152,6 +153,21 @@ def test_skill_demand_and_salary_bands_read_their_marts(monkeypatch: pytest.Monk
     assert demand.loc[0, "share_of_role_postings"] == pytest.approx(0.79)
     assert bands.loc[0, "salary_median"] == 165000.0
     assert "order by role_name, demand_rank" in pool.queries[0]
+
+
+def test_demand_history_and_forecast_read_their_tables(monkeypatch: pytest.MonkeyPatch) -> None:
+    pool = _install_pool(
+        monkeypatch,
+        {
+            "mart_skill_demand": (["search_role", "share_of_role_postings"], [("data engineer", Decimal("0.4"))]),
+            "stg_skill_demand_forecast": (["search_role", "observed_weeks"], [("data engineer", 2)]),
+        },
+    )
+
+    history, forecast = data.skill_demand_history(), data.skill_demand_forecast()
+
+    assert history.loc[0, "share_of_role_postings"] == 0.4 and forecast.loc[0, "observed_weeks"] == 2
+    assert "collection_week" in pool.queries[0] and "forecast_week" in pool.queries[1]
 
 
 def test_job_insights_splits_keywords_and_adds_shares(monkeypatch: pytest.MonkeyPatch) -> None:
