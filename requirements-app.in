@@ -1,0 +1,19 @@
+# Phase 6 server image: only what the Streamlit app imports — none of the pipeline's
+# packages (dbt, Spark, MLflow, Prophet, BERTopic, spaCy). Compile it seeded from the
+# laptop lock so every shared version is identical:
+#
+#   cp requirements-ml.txt requirements-app.txt
+#   pip-compile requirements-app.in --output-file=requirements-app.txt --strip-extras --no-emit-index-url
+#
+# The image installs CPU-only PyTorch first, then this lock with --no-deps (as the CI
+# ml job does): Linux-only extras such as XGBoost's GPU library are left out.
+streamlit
+pyarrow
+pandas
+numpy
+psycopg2-binary
+boto3
+python-dotenv
+xgboost
+sentence-transformers
+pdfplumber

@@ -341,7 +341,9 @@ Local runtime ($0, no Docker):
   http://localhost:8080, scheduler, dag-processor, triggerer).
 - AIRFLOW_HOME = .airflow/ in the repo (git-ignored): config, logs and the
   SQLite metadata DB. SQLite + LocalExecutor is Airflow 3's supported
-  local-dev setup; it runs one task at a time, which suits our linear DAG.
+  local-dev setup. It does run independent tasks in parallel: in the first
+  9-task run (2026-10-13) train_salary_model and forecast_demand started
+  0.2 s apart and overlapped.
   load_examples off; dags_folder = src/dags.
 - Tasks run the pipeline with the project's own .venv
   (`.venv/bin/python -m …`, dbt via `.venv/bin/dotenv -f .env run -- dbt …`),
@@ -415,8 +417,8 @@ Status: COMPLETE (2026-10-07).
   recur with unchanged code; cause not isolated (likely a one-off of that
   session, e.g. network or first connection setup). Airflow now records every
   task's duration, so a regression would show in the run history.
-- DAG left PAUSED. Nightly 22:00 UTC runs need: DAG switched on in the
-  dashboard + infra/airflow/run_local.sh running + the Mac awake.
+- DAG left PAUSED here; switched ON 2026-10-13 (Phase 6 step 0). Nightly
+  22:00 UTC runs need: infra/airflow/run_local.sh running + the Mac awake.
 - Still open: a stop_local.sh for background runs (pkill on `airflow
   standalone` orphans its components; Ctrl+C in a terminal is fine);
   OBJC_DISABLE_INITIALIZE_FORK_SAFETY kept set (runs succeeded with it,
@@ -636,8 +638,8 @@ Decisions (2026-10-07):
 - Real data (2026-10-13): 390 series, ALL insufficient_history — only 2 collection
   weeks exist (2026-09-28 for every role, 2026-10-05 for data engineer);
   293 series have 1 point, 97 have 2. Forecasts need ≥ 12 weeks of weekly
-  collection: the daily DAG is still PAUSED — switch it on (and keep the Mac
-  awake at 22:00 UTC) → first forecasts ~12 weeks later.
+  collection: the daily DAG has been ON since 2026-10-13 (needs Airflow
+  running + the Mac awake at 22:00 UTC) → first forecasts ~12 weeks later.
 - dbt: source ml.skill_demand_forecast → stg_skill_demand_forecast; tests:
   unique role|skill|week, accepted statuses, row consistency (forecast rows:
   week after the last observed, 0 ≤ lower ≤ forecast ≤ upper ≤ 1;
@@ -682,7 +684,8 @@ dbt_build → train_salary_model → forecast_demand (update test_dags.py).
   {train_salary_model, forecast_demand}. The two models branch off
   dbt_build instead of chaining (spec sketch): both read dbt marts but not
   each other, so a failed salary run (e.g. Databricks down) doesn't block
-  the forecast; LocalExecutor + SQLite runs one task at a time anyway.
+  the forecast. They do run in parallel (see Phase 4 local runtime); they
+  are separate processes, so that is safe.
 - One process per task (BashOperator → .venv/bin/python -m …) keeps
   PyTorch (nlp_enrich) and XGBoost (train_salary_model) apart (5.6 rule).
 - Timeouts: nlp_enrich 45 min (~1 min awake), train_salary_model 30 min,
@@ -695,10 +698,18 @@ dbt_build → train_salary_model → forecast_demand (update test_dags.py).
   train_salary_model logged MLflow run b1b028edc59847da9da04d914828a7ef and
   re-exported the same model (the S3 card now names this run);
   forecast_demand wrote 390 insufficient_history rows.
-- Not yet run: a full scheduled DAG run with the ML tasks (5.7 deliverable).
-  The DAG is still PAUSED. Mac sleep (pmset sleep 1) stalls tasks mid-run;
-  an option is to start Airflow under `caffeinate -i` in run_local.sh
-  (keeps the Mac awake while Airflow runs) — not done, the user's call.
+- 5.7 deliverable MET 2026-10-13: DAG unpaused → the latest missed slot
+  (scheduled__2026-10-12T22:00) ran all 9 tasks green in 3 min 31 s:
+  fetch_jobs 25.9 s, clean_jobs 30.4, extract_skills 29.8, load_postgres
+  24.3, nlp_enrich 56.8, dbt_source_freshness 4.2, dbt_build 10.7, then in
+  parallel train_salary_model 22.1 and forecast_demand 2.9. Fetched 30 data
+  scientist postings (NY) with 3 JSearch requests (RapidAPI: 115 left);
+  postings 704 → 731 (283 salaried); salary CV MAE $34,297; MLflow run
+  478031886bae40aaabfb6b4ddd513815; 393 demand series, all
+  insufficient_history. The DAG stays ON.
+- Mac sleep (pmset sleep 1) stalls tasks mid-run; an option is to start
+  Airflow under `caffeinate -i` in run_local.sh (keeps the Mac awake while
+  Airflow runs) — not done, the user's call.
 
 5.6 Dependencies (installed 2026-10-09): spaCy, sentence-transformers
 (PyTorch), BERTopic, XGBoost, Prophet, scikit-learn, mlflow-skinny (client
@@ -734,8 +745,7 @@ coverage; unit tests (years cases, feature builder, gate, baselines, PDF
 text / no text); dbt CI fixture gains an ml.posting_nlp sample.
 
 ### Phase 6 — Streamlit app + EC2 hosting
-Build after Phase 5 is confirmed working. Hosting details (EC2, nginx,
-systemd, deploy): ask for spec when Phase 5 is done.
+Plan approved 2026-10-13 (decisions D1–D6 below; build order at the end).
 
 App direction (set 2026-10-04): a resume intelligence tool, not a generic
 market dashboard.
@@ -764,13 +774,59 @@ Decisions:
 - Text-based PDFs only (no OCR); a scanned/image-only PDF yields no text →
   show a clear message instead of an empty analysis.
 
-Open questions (decide before building):
-- Match % formula (e.g. demand-weighted share of a role's top skills found).
-- Salary impact of a missing skill: model what-if vs. median salary of
-  postings with vs. without the skill. Both are associations, not causal —
-  UI wording must say "associated with".
-- "This week's postings" needs ingestion at least weekly; the JSearch free
-  plan (200 requests/month) limits how many postings that covers.
+Decisions (2026-10-13):
+- D1 Matching postings: embeddings. The resume is embedded with the same
+  pinned all-MiniLM-L6-v2 + embed_texts() as the postings (5.1b) and ranked
+  by cosine similarity; shared skills are shown as the "why". Costs PyTorch
+  on the server (~+1 GB image, ~0.5 GB RAM of the t3.small's 2 GB). OpenMP
+  rule: the app predicts with XGBoost single-threaded (n_jobs=1).
+- D2 Match % = demand-weighted coverage: over the skills in ≥ 10% of a
+  role's postings (13–30 per role), sum of the shares of those on the
+  resume ÷ sum of all their shares; the page lists which skills counted.
+- D3 Top 3 missing skills = the most in-demand ones the resume lacks; each
+  shows the model what-if (if in what_if_skills) and the within-role
+  median difference (mart_skill_salary_by_role, if enough salaries),
+  worded "associated with" (not causal).
+- D4 HTTPS on a free sslip.io hostname for the Elastic IP
+  (e.g. 3-15-22-7.sslip.io resolves to 3.15.22.7) with a Let's Encrypt
+  certificate via nginx; no domain purchase. Plain HTTP is not acceptable
+  for resume uploads.
+- D5 Deploy via GitHub OIDC → AWS SSM Run Command: no SSH port open to the
+  internet; the user creates the IAM role for GitHub in the console.
+- D6 Docker: the app (and nginx) in Docker Compose, started by systemd.
+- "This week's postings" = fetched in the last 7 days; when a role has
+  none, the latest collection, labelled with its date (the free JSearch
+  plan refreshes each role about every 5 days).
+
+Dependencies (approved 2026-10-13):
+- pyproject `app` group: streamlit>=1.65,<2 + pyarrow>=25,<26 (the
+  embeddings Parquet; until now only via PySpark in dev). Streamlit 1.65.0
+  fits every existing pin: requirements-ml.txt (laptop) 165 → 173 packages,
+  no version changes.
+- requirements-app.txt (server image), compiled from requirements-app.in
+  (the app's 10 direct imports) seeded from requirements-ml.txt: 77
+  packages, every version identical to the laptop lock; no dbt, MLflow,
+  PySpark, Prophet, BERTopic or spaCy. Not compiled from pyproject: that
+  always adds the base deps (dbt). The image installs CPU PyTorch, then
+  `pip install --no-deps -r requirements-app.txt` (as the CI ml job).
+- Serving code must not import salary_model.py (MLflow): predict_salary +
+  skill_impact move to a light serving module (build step 3).
+- pip-tools quirk: lock headers print `--no-index` for
+  --no-emit-index-url; resolution still uses PyPI.
+
+Estimated AWS cost (on-demand list, us-east-2; confirm before creating):
+EC2 t3.small $15.18/month + EBS gp3 20 GB $1.60 + Elastic IP $3.65 +
+transfer ~$0 ≈ $20.43/month (≈ $38/month with RDS). sslip.io: $0.
+
+Build order: 0 DAG on + one green 9-task run (done 2026-10-13) → 1 app
+dependencies → 2 data layer (read-only DB user app_reader, cached RDS
+queries, S3 loaders, new mart_role_skill_profile) → 3 app logic as tested
+pure functions → 4 four pages + Streamlit AppTest; the user tries it
+locally → 5 Docker image + compose (nginx) → 6 AWS after cost confirmation
+(EC2, Elastic IP, security groups, S3-read instance role, EC2 → RDS rule,
+HTTPS) → 7 systemd + nginx (websockets, upload size, rate limit) → 8 CI/CD
+(app tests on PRs; build → GHCR → deploy via OIDC + SSM on merge) → 9
+public smoke test, docs, resume bullet.
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their
