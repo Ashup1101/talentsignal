@@ -25,7 +25,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import closing
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from statistics import median
 
@@ -255,20 +255,6 @@ def train_final(rows: Sequence[TrainingRow], n_trees: int) -> tuple[XGBRegressor
     return _fit_model(X, np.log([r.salary for r in rows]), n_trees), spec
 
 
-def predict_salary(model: XGBRegressor, spec: FeatureSpec, profiles: Sequence[Profile]) -> np.ndarray:
-    """Predict annual salaries in dollars.
-
-    Args:
-        model: Trained model (predicts log salary).
-        spec: Its feature spec.
-        profiles: Postings or resumes.
-
-    Returns:
-        Dollars, one per profile.
-    """
-    return np.exp(model.predict(build_features(profiles, spec)))
-
-
 def what_if_skills(rows: Sequence[TrainingRow], spec: FeatureSpec) -> dict[str, list[str]]:
     """Skills whose what-if impact may be shown, per role.
 
@@ -287,33 +273,6 @@ def what_if_skills(rows: Sequence[TrainingRow], spec: FeatureSpec) -> dict[str, 
     return {
         role: sorted(s for s in spec.skills if counts[role][s] >= MIN_WHAT_IF_POSTINGS) for role in spec.roles
     }
-
-
-def skill_impact(
-    model: XGBRegressor, spec: FeatureSpec, profile: Profile, candidates: Sequence[str]
-) -> dict[str, float]:
-    """Model what-if: the predicted salary change if the profile also had each skill.
-
-    An association learned from postings, not a causal effect: the UI must say
-    "associated with".
-
-    Args:
-        model: Trained model.
-        spec: Its feature spec.
-        profile: The resume (or posting) as it is.
-        candidates: Skills to try (e.g. what_if_skills()[role]); ones the profile
-            already has are skipped.
-
-    Returns:
-        skill → dollars (with skill − without), largest first.
-    """
-    missing = [s for s in candidates if s not in profile.skills]
-    if not missing:
-        return {}
-    variants = [replace(profile, skills=profile.skills | {s}) for s in missing]
-    salaries = predict_salary(model, spec, [profile, *variants])
-    deltas = {s: float(v - salaries[0]) for s, v in zip(missing, salaries[1:], strict=True)}
-    return dict(sorted(deltas.items(), key=lambda kv: kv[1], reverse=True))
 
 
 def evaluation_metrics(cv: CVResult) -> dict[str, float]:

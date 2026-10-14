@@ -18,9 +18,11 @@ from typing import Any, Protocol
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-# Pinned so the pipeline and the app always load identical weights.
-MODEL_REVISION = "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
+from src.ml.artifacts import EMBEDDING_MODEL_NAME, EMBEDDING_MODEL_REVISION
+
+# Pinned in artifacts.py so the pipeline and the app always load identical weights.
+MODEL_NAME = EMBEDDING_MODEL_NAME
+MODEL_REVISION = EMBEDDING_MODEL_REVISION
 EMBEDDING_DIM = 384
 # Our postings average ~1.3 word-pieces per word: 150-word chunks fit the 256-piece
 # window 99% of the time (200-word chunks overflowed 55%, measured 2026-10-09).
