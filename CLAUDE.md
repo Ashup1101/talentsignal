@@ -146,6 +146,9 @@ talentsignal/
 │       ├── streamlit_app.py      # entry point
 │       ├── data.py               # read-only data access: cached RDS queries + S3 loaders (no Streamlit)
 │       ├── db_setup.py           # creates app_reader, the read-only DB user (run once)
+│       ├── __init__.py           # pins OMP_NUM_THREADS=1 (PyTorch + XGBoost in one process)
+│       ├── serving.py            # salary model: load from JSON (1 thread), predict, what-if
+│       ├── logic.py              # match %, missing skills, salary + range, posting matching
 │       └── pages/                # Streamlit orders the sidebar by filename
 │           ├── 01_resume_analyzer.py  # upload resume PDF → skills, match %, salary, gaps
 │           ├── 02_salary_explorer.py
@@ -168,6 +171,7 @@ talentsignal/
 │   ├── test_resume_features.py   # PDF → text → skills → features (ml CI job)
 │   ├── test_app_data.py          # data.py with a stub DB pool + Stubber S3
 │   ├── test_db_setup.py          # app_reader statements; password only as a parameter
+│   ├── test_app_logic.py         # logic + serving on stub data; OpenMP regression (ml CI job)
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
@@ -866,6 +870,38 @@ Step 2 Status: BUILT (2026-10-13) — data layer.
 - FINDING for Page 4: the 2026-10-13 run (+27 postings) reshuffled the
   topics: unassigned 47% → 52%, data engineering 109 → 50 postings, noisy
   topics ("ago", "mcdonalds" keywords). Stabilise before Job Insights.
+
+Step 3 Status: BUILT (2026-10-13) — app logic as tested pure functions.
+- src/app/serving.py: predict_salary + skill_impact moved from
+  salary_model.py (training keeps what_if_skills) + load_model(model_json)
+  (single-threaded). Importing it loads XGBoost (+ scikit-learn via
+  XGBRegressor), never MLflow, PyTorch or Streamlit.
+- src/app/logic.py: core_skills / match_pct (D2), top_missing_skills (D3),
+  predict_salary_for_resume, match_postings (D1). Additions to the agreed
+  signatures (keyword-only, defaulted): top_missing_skills takes seniority /
+  state / remote (the what-if needs a profile); match_postings takes
+  resume_skills (shared skills) and now (tests). Salary range = ± the
+  role's CV MAE (overall when none); role median when use_model is false.
+  "This week" = fetched in the last 7 days, else the role's latest
+  collection (frame.attrs window / since). Embeddings from another model
+  revision are refused (EMBEDDING_MODEL_NAME / _REVISION now live in
+  artifacts.py; embeddings.py imports them).
+- CRASH FOUND + FIXED: in the app process, XGBoost imported before PyTorch
+  → PyTorch's multi-threaded OpenMP segfaulted (exit 139) while embedding,
+  even with XGBoost on 1 thread; OMP_NUM_THREADS=2 still crashed, 1 works.
+  src/app/__init__.py pins OMP_NUM_THREADS=1 before any app module loads
+  either library (the Docker image will set it too). Cost: a 2-page resume
+  embeds in 0.25 s single-threaded. Regression test: a fresh process with
+  the variable unset embeds + trains/predicts XGBoost → exit 0.
+- Real smoke test (made-up resume fixture, real RDS/S3/model): skills
+  Python, SQL, Spark, Airflow, dbt, PostgreSQL, AWS, Docker; match % 23–36%
+  (data engineer: 6 of 30 core skills); missing ETL, Machine Learning,
+  Data Modeling; salary (model, mid, TX) $143,669 ± $27,605 vs role median
+  $162,500; matches 0.70–0.74 similarity from the last 7 days with shared
+  skills; analyst / software engineer fall back to the Oct 3 collection.
+- For the page: the model's what-if is often ~$0 (shallow trees rarely
+  split on those skills) while within-role medians differ by thousands —
+  word $0 as "no measurable effect in the model".
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their

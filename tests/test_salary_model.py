@@ -18,6 +18,7 @@ import pytest
 pytest.importorskip("xgboost")
 pytest.importorskip("mlflow")
 
+from src.app import serving  # noqa: E402
 from src.ml import salary_model  # noqa: E402
 from src.ml.features import Profile  # noqa: E402
 from src.ml.salary_model import MedianBaseline, TrainingRow  # noqa: E402
@@ -70,7 +71,7 @@ def test_skill_impact_finds_the_planted_effect(rows: list[TrainingRow]) -> None:
     model, spec = salary_model.train_final(rows, n_trees=300)
     profile = Profile("data engineer", "senior", "NY", False, frozenset({"SQL"}))
 
-    impact = salary_model.skill_impact(model, spec, profile, ["Spark", "SQL", "Excel"])
+    impact = serving.skill_impact(model, spec, profile, ["Spark", "SQL", "Excel"])
 
     assert list(impact) == ["Spark", "Excel"]  # SQL is already there; largest first
     assert impact["Spark"] > 30_000  # planted: +30% of a $225K senior salary
@@ -132,7 +133,7 @@ def test_export_writes_a_loadable_model_and_card(rows: list[TrainingRow], monkey
     reloaded.load_model(bytearray(uploads["models/salary/model.json"]))
     profiles = [r.profile for r in rows[:5]]
     np.testing.assert_allclose(
-        salary_model.predict_salary(reloaded, spec, profiles), salary_model.predict_salary(model, spec, profiles)
+        serving.predict_salary(reloaded, spec, profiles), serving.predict_salary(model, spec, profiles)
     )
     assert json.loads(uploads["models/salary/feature_spec.json"])["use_model"] is True
 
