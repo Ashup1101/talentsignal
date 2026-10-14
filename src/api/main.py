@@ -47,6 +47,8 @@ LEVEL_LABELS = {
     "manager": "Manager",
     UNKNOWN: "Not sure",
 }
+# For the docs page's role picker only; validation uses the model card's roles.
+SEARCH_ROLES = ["data analyst", "data engineer", "data scientist", "machine learning engineer", "software engineer"]
 
 app = FastAPI(
     title="TalentSignal API",
@@ -278,12 +280,28 @@ def _analyze(pdf: bytes, role: str, level: str, state: str | None, remote: bool)
         400: {"model": s.ErrorBody}, 413: {"model": s.ErrorBody}, 415: {"model": s.ErrorBody},
         422: {"model": s.ErrorBody}, 503: {"model": s.ErrorBody},
     },
-    openapi_extra={"requestBody": {"required": True, "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}}}},
+    # OpenAPI 3.1 describes a raw file body with contentMediaType (3.0's "format: binary"
+    # made the docs page show no file picker, so it never sent the upload).
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "description": "The resume as a PDF file (max 5 MB).",
+            "content": {"application/pdf": {"schema": {"type": "string", "contentMediaType": "application/pdf"}}},
+        }
+    },
 )
 async def analyze(
     request: Request,
-    role: str = Query(..., description="Target role, e.g. 'data engineer'"),
-    level: str = Query(UNKNOWN, description="The user's level (see /api/options)"),
+    role: str = Query(
+        ...,
+        description="Target role (see /api/options)",
+        openapi_examples={r: {"value": r} for r in SEARCH_ROLES},
+    ),
+    level: str = Query(
+        UNKNOWN,
+        description="The user's level (see /api/options)",
+        json_schema_extra={"enum": list(LEVEL_LABELS)},
+    ),
     state: str | None = Query(None, description="Two-letter state, or omit"),
     remote: bool = Query(False),
 ) -> s.Analysis:

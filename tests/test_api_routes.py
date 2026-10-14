@@ -171,5 +171,12 @@ def test_insights_topics_mix_levels_and_remote(client: TestClient) -> None:
 def test_openapi_documents_the_pdf_upload(client: TestClient) -> None:
     spec = client.get("/api/openapi.json").json()
 
-    assert "application/pdf" in spec["paths"]["/api/analyze"]["post"]["requestBody"]["content"]
+    post = spec["paths"]["/api/analyze"]["post"]
+    # OpenAPI 3.1 file body: contentMediaType (the docs page shows a file picker for it).
+    assert post["requestBody"]["content"]["application/pdf"]["schema"] == {
+        "type": "string", "contentMediaType": "application/pdf",
+    }
+    params = {p["name"]: p for p in post["parameters"]}
+    assert set(params["role"]["examples"]) == set(main.SEARCH_ROLES)
+    assert params["level"]["schema"]["enum"][-1] == "unknown"
     assert client.get("/api/docs").status_code == 200
