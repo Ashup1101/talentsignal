@@ -1,4 +1,4 @@
-"""Create or update app_reader, the Streamlit app's read-only PostgreSQL user (Phase 6).
+"""Create or update app_reader, the app API's read-only PostgreSQL user (Phase 6).
 
 app_reader can SELECT from the dbt schemas and ml.* — nothing else: no raw.*
 tables, no writes (every session is read-only by default), 30 s statement limit.
@@ -8,7 +8,7 @@ readable too, without re-running this.
 Run once (and again after changing APP_SCHEMAS), connected as the RDS user that
 owns those schemas (RDS_USER); app_reader's password comes from APP_DB_PASSWORD:
 
-    python -m src.app.db_setup
+    python -m src.api.db_setup
 """
 
 from __future__ import annotations

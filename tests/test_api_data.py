@@ -1,4 +1,4 @@
-"""Tests for src/app/data.py with a stub database and stubbed S3 (no network, no AWS).
+"""Tests for src/api/data.py with a stub database and stubbed S3 (no network, no AWS).
 
 The database is a fake psycopg2 pool; S3 is botocore's Stubber, which fails any
 call that wasn't explicitly stubbed.
@@ -23,7 +23,7 @@ import pytest
 from botocore.response import StreamingBody
 from botocore.stub import Stubber
 
-from src.app import data
+from src.api import data
 from src.ml import artifacts
 
 CACHED = (
@@ -133,7 +133,26 @@ def test_a_failed_query_discards_the_connection(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(psycopg2.OperationalError):
         data.salary_bands()
 
-    assert pool.returned == [True]  # closed, so a broken connection is never reused
+    assert pool.returned == [True, True]  # tried twice; both broken connections closed, never reused
+
+
+def test_a_connection_that_died_while_idle_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    pool = _install_pool(monkeypatch, {"mart_salary_bands": (["role_name"], [("data engineer",)])})
+    real_getconn, calls = pool.getconn, []
+
+    def getconn() -> SimpleNamespace:
+        conn = real_getconn()
+        calls.append(conn)
+        if len(calls) == 1:  # the first pooled connection is dead
+            def dead_cursor() -> object:
+                raise psycopg2.InterfaceError("connection already closed")
+            conn.cursor = dead_cursor
+        return conn
+
+    pool.getconn = getconn
+
+    assert data.salary_bands()["role_name"].tolist() == ["data engineer"]
+    assert pool.returned == [True, False]  # dead one closed, fresh one returned to the pool
 
 
 def test_skill_demand_and_salary_bands_read_their_marts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -246,8 +265,8 @@ def test_a_missing_s3_object_says_what_to_run(s3: Stubber) -> None:
 
 
 def test_data_module_stays_light() -> None:
-    # The pages import it on every rerun; it must not drag in Streamlit, PyTorch or XGBoost.
-    code = "import sys, src.app.data; print(sorted(m for m in ('streamlit', 'torch', 'xgboost') if m in sys.modules))"
+    # Loaded by every request path; it must not drag in PyTorch or XGBoost.
+    code = "import sys, src.api.data; print(sorted(m for m in ('torch', 'xgboost') if m in sys.modules))"
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=True)
 
     assert result.stdout.strip() == "[]"

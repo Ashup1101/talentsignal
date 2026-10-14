@@ -1,4 +1,4 @@
-# Phase 6 server image: only what the Streamlit app imports — none of the pipeline's
+# Phase 6 server image: only what the API (src/api) imports — none of the pipeline's
 # packages (dbt, Spark, MLflow, Prophet, BERTopic, spaCy). Compile it seeded from the
 # laptop lock so every shared version is identical:
 #
@@ -7,7 +7,8 @@
 #
 # The image installs CPU-only PyTorch first, then this lock with --no-deps (as the CI
 # ml job does): Linux-only extras such as XGBoost's GPU library are left out.
-streamlit
+fastapi
+uvicorn
 pyarrow
 pandas
 numpy

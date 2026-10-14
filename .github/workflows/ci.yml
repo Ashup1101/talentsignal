@@ -1,7 +1,7 @@
 name: CI
 
 # pytest, the Airflow DAG tests and the ML tests run on every push / PR to main; dbt build runs
-# on PRs against a throwaway Postgres. Planned: Streamlit redeploy on push to main
+# on PRs against a throwaway Postgres. Planned: app redeploy on push to main
 # (Phase 6).
 on:
   push:
@@ -157,4 +157,35 @@ jobs:
         run: >-
           pytest -q tests/test_ml.py tests/test_nlp.py tests/test_embeddings.py tests/test_topics.py
           tests/test_features.py tests/test_salary_model.py tests/test_demand_forecast.py
-          tests/test_resume_features.py tests/test_app_logic.py tests/test_app_pages.py
+          tests/test_resume_features.py tests/test_api_logic.py tests/test_api_routes.py
+
+  api:
+    name: API tests (server lock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-app.txt
+
+      # Exactly what the server image installs: CPU-only PyTorch, then the server lock
+      # with --no-deps. If the API needed a package missing from requirements-app.txt,
+      # this job (not the laptop-lock jobs) would catch it. Plus pytest, pinned.
+      - name: Install the server lock
+        run: |
+          pip install "torch==$(grep -E '^torch==' requirements-app.txt | cut -d= -f3)" --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-deps -r requirements-app.txt
+          pip install "pytest==$(grep -E '^pytest==' requirements-dev.txt | cut -d= -f3)"
+
+      - name: Cache embedding model
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('src/ml/embeddings.py') }}
+
+      - name: API tests
+        run: pytest -q tests/test_api_routes.py tests/test_api_logic.py tests/test_api_data.py tests/test_db_setup.py

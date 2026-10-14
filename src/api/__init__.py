@@ -1,4 +1,4 @@
-"""The Streamlit app (Phase 6).
+"""The app's Python API (Phase 6): FastAPI over the dbt marts, ml.* and the Phase 5 models.
 
 PyTorch (resume embeddings) and XGBoost (salary) each bring an OpenMP runtime; in
 one process, multi-threaded OpenMP crashes (segfault, exit 139 — measured on macOS

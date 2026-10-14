@@ -3,7 +3,7 @@
 Job market intelligence and predictive analytics platform. Job postings are
 ingested from public APIs into S3, processed with PySpark on Databricks,
 modeled with dbt, orchestrated by Airflow, enriched with NLP + ML, and served
-through a Streamlit app on AWS EC2.
+through a web app (Next.js frontend + FastAPI) on AWS EC2.
 
 See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 
@@ -16,7 +16,7 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
 | 3     | dbt modeling                   | Done        |
 | 4     | Airflow orchestration          | Done        |
 | 5     | NLP + ML models                | Not started |
-| 6     | Streamlit app + EC2 hosting    | Not started |
+| 6     | Web app (Next.js + FastAPI) + EC2 | In progress |
 
 ## Local setup
 

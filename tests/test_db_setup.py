@@ -1,10 +1,10 @@
-"""Tests for src/app/db_setup.py (the app's read-only database user), with a fake connection."""
+"""Tests for src/api/db_setup.py (the app's read-only database user), with a fake connection."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.app import db_setup
+from src.api import db_setup
 
 
 class _RecordingCursor:
