@@ -1,0 +1,43 @@
+# TalentSignal app (Phase 6): the API (FastAPI) and web (nginx: the static Next.js export,
+# proxying /api/ to the API). Laptop: infra/docker/run_local.sh builds and starts both.
+# Server: the same services from GHCR images (API_IMAGE / WEB_IMAGE), no build.
+#
+# Values come from the env file passed with --env-file (the repo's .env on the laptop).
+# Each container gets only the variables it reads: never the pipeline's admin database
+# password, RapidAPI key or Databricks token.
+
+name: talentsignal
+
+services:
+  api:
+    image: ${API_IMAGE:-talentsignal-api:local}
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    environment:
+      - RDS_HOST
+      - RDS_PORT
+      - RDS_DB
+      - APP_DB_USER          # read-only user (src/api/db_setup.py)
+      - APP_DB_PASSWORD
+      - AWS_REGION
+      - S3_CURATED_BUCKET
+      # Laptop only. Unset on EC2, where boto3 uses the instance role instead.
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+    expose:
+      - "8000"               # reachable from nginx only, not published on the host
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:-talentsignal-web:local}
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+    ports:
+      # Laptop: 127.0.0.1 only (not the local network). The server sets WEB_BIND=0.0.0.0.
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-80}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
