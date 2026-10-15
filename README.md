@@ -10,8 +10,6 @@ made-up sample) to see your skills, match per role, an estimated salary, the in-
 skills you're missing and matching postings. Resumes are analyzed in memory and never
 stored. API docs: https://77-113-138-96.sslip.io/api/docs
 
-See [CLAUDE.md](CLAUDE.md) for the full specification and phase plan.
-
 ## Architecture
 
 ```
@@ -55,7 +53,7 @@ then set `JAVA_HOME`). On macOS, XGBoost also needs OpenMP: `brew install libomp
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-ml.txt   # everything: pipeline + dev + ML (~2.6 GB)
-# create .env with the variables under "Secrets needed" in CLAUDE.md
+# create .env with the API keys, AWS, RDS and Databricks settings (never committed)
 pytest
 ```
 
