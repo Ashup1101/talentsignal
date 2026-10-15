@@ -1,8 +1,10 @@
 name: CI
 
 # pytest, the Airflow DAG tests, the ML / API / web tests and the Docker image build run on
-# every push / PR to main; dbt build runs on PRs against a throwaway Postgres. Planned: push
-# the images to GHCR and redeploy the app on push to main (Phase 6).
+# every push / PR to main; dbt build runs on PRs against a throwaway Postgres. On a push to
+# main, once those pass: publish the images to GHCR; the server deploys them itself
+# (infra/deploy/update.sh, every 2 minutes) and the release job waits for the live site to
+# serve this commit, then runs the public smoke test. No AWS credentials live in GitHub.
 on:
   push:
     branches: [main]
@@ -242,7 +244,7 @@ jobs:
       - uses: docker/setup-buildx-action@v4
 
       # Both images as the server runs them (linux/amd64, like the EC2 t3.small), loaded
-      # locally, not pushed: pushing to GHCR happens on merge to main (deploy job, later).
+      # locally, not pushed: the publish job pushes them on main.
       # Layers are cached in GitHub's Actions cache, so unchanged dependencies don't rebuild.
       - name: Build the API image
         uses: docker/build-push-action@v7
@@ -260,6 +262,7 @@ jobs:
           context: .
           file: infra/docker/web.Dockerfile
           tags: talentsignal-web:ci
+          build-args: GIT_SHA=${{ github.sha }}
           load: true
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
@@ -285,7 +288,108 @@ jobs:
           curl -fsS http://127.0.0.1/ | grep -q "TalentSignal"
           curl -fsS http://127.0.0.1/analyze/ | grep -q "Resume Analyzer"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/no-such-page/)" = 404
+          curl -fsS http://127.0.0.1/version.json | grep -q "$GITHUB_SHA"
+
+      # The server's modes with a self-signed certificate: HTTPS + redirect, and the
+      # first-deploy fallback (HTTP that still serves the ACME challenge).
+      - name: nginx HTTPS modes
+        run: infra/docker/test_tls.sh talentsignal-web:ci
 
       - name: Container logs
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs
+
+  # --- Release (push to main only) -------------------------------------------------------------
+
+  publish:
+    name: Publish images (GHCR)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, dags, ml, api, web, docker]  # dbt runs on PRs only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tagged with the commit (what the server runs) and latest; the layers come from the
+      # docker job's cache. The source label links the packages to this public repo.
+      - name: Push the API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: |
+            ghcr.io/ashup1101/talentsignal-api:${{ github.sha }}
+            ghcr.io/ashup1101/talentsignal-api:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=api
+
+      # Last: web:latest is the release pointer the server watches, so the API image of the
+      # same commit already exists when the server sees it.
+      - name: Push the web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          push: true
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ghcr.io/ashup1101/talentsignal-web:${{ github.sha }}
+            ghcr.io/ashup1101/talentsignal-web:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=web
+
+      # The server pulls anonymously: the packages must be public.
+      - name: Images are publicly pullable
+        run: |
+          for image in talentsignal-api talentsignal-web; do
+            token=$(curl -fsS "https://ghcr.io/token?scope=repository:ashup1101/$image:pull" | jq -r .token)
+            curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
+              -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+              "https://ghcr.io/v2/ashup1101/$image/manifests/${{ github.sha }}" \
+              || { echo "::error::$image is not public: Packages → $image → Package settings → Change visibility"; exit 1; }
+            echo "$image:${{ github.sha }} is public"
+          done
+
+  release:
+    name: Live on EC2 + public smoke test
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: release
+      cancel-in-progress: true  # a newer commit supersedes this one on the server anyway
+    env:
+      APP_HOST: ${{ vars.APP_HOST }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The server checks GHCR every 2 minutes, then deploys (pull + restart, ~2 min).
+      - name: Wait for the server to run this commit
+        run: |
+          test -n "$APP_HOST" || { echo "::error::repository variable APP_HOST is not set"; exit 1; }
+          for _ in $(seq 120); do
+            live=$(curl -fsS --max-time 10 "https://$APP_HOST/version.json" 2>/dev/null | jq -r .commit 2>/dev/null || true)
+            if [ "$live" = "$GITHUB_SHA" ]; then echo "live: $live"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::https://$APP_HOST/ still serves ${live:-nothing} after 20 minutes"
+          exit 1
+
+      - name: Public smoke test
+        run: infra/deploy/smoke_test.sh "$APP_HOST"

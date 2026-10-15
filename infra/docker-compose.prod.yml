@@ -1,0 +1,16 @@
+# Server additions to docker-compose.yml (infra/deploy/deploy.sh uses both files):
+# HTTPS on 443 with the Let's Encrypt certificate kept on the host, and published images
+# only (the server has no source code to build from).
+services:
+  api:
+    build: !reset null
+
+  web:
+    build: !reset null
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:443:443"
+    environment:
+      - TLS_HOST             # e.g. 77-113-138-96.sslip.io; see infra/docker/nginx/
+    volumes:
+      - /opt/talentsignal/letsencrypt:/etc/letsencrypt:ro   # certbot writes, nginx reads
+      - /opt/talentsignal/acme:/var/www/acme:ro             # ACME challenge files
