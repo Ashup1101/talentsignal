@@ -110,3 +110,12 @@ def test_server_compose_never_builds_and_mounts_certificates_read_only() -> None
 
     assert all(svc["build"] is None for svc in prod["services"].values())
     assert all(v.endswith(":ro") for v in prod["services"]["web"]["volumes"])
+
+
+def test_web_image_is_healthy_only_once_nginx_serves() -> None:
+    # Without it `compose up --wait` returns while nginx is still starting (CI flaked on it).
+    dockerfile = (DOCKER / "web.Dockerfile").read_text()
+
+    assert re.search(r"HEALTHCHECK .*\n\s+CMD wget -q -O /dev/null http://127\.0\.0\.1/healthz", dockerfile)
+    for site in ("http.conf", "https.conf"):
+        assert "location = /healthz" in (DOCKER / "nginx" / site).read_text()

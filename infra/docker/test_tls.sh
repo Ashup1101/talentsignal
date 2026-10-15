@@ -42,6 +42,7 @@ H=(-sk --resolve "$HOST:18443:127.0.0.1")
 [[ "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' 'http://127.0.0.1:18080/analyze/?x=1')" \
   == "301 https://$HOST/analyze/?x=1" ]] || fail "port 80 redirect"
 [[ "$(curl -s http://127.0.0.1:18080/.well-known/acme-challenge/probe)" == challenge-ok ]] || fail "ACME on port 80"
+[[ "$(curl -s http://127.0.0.1:18080/healthz)" == ok ]] || fail "/healthz on port 80 (HTTPS mode)"
 if curl "${H[@]}" --tlsv1.1 --tls-max 1.1 -o /dev/null "https://$HOST:18443/" 2>/dev/null; then fail "TLS 1.1 accepted"; fi
 echo "==> HTTPS mode: HTTP/2, HSTS, redirect, ACME on 80, TLS 1.1 refused"
 
@@ -49,4 +50,5 @@ start tls-first no -p 127.0.0.1:18081:80
 [[ "$(logs tls-first)" == *"no certificate for $HOST yet, HTTP only"* ]] || fail "HTTP fallback not chosen"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/)" == 200 ]] || fail "HTTP home (first deploy)"
 [[ "$(curl -s http://127.0.0.1:18081/.well-known/acme-challenge/probe)" == challenge-ok ]] || fail "ACME (first deploy)"
+[[ "$(curl -s http://127.0.0.1:18081/healthz)" == ok ]] || fail "/healthz (first deploy)"
 echo "==> first-deploy mode: HTTP only, ACME challenge served"
