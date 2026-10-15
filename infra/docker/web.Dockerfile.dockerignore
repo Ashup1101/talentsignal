@@ -1,6 +1,6 @@
 # Allowlist: the frontend's sources and the nginx config (no node_modules, builds or .env*).
 *
-!infra/docker/nginx.conf
+!infra/docker/nginx/
 !web/
 web/node_modules
 web/.next

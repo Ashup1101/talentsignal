@@ -78,13 +78,26 @@ talentsignal/
 │   │   └── run_local.sh          # env vars + `airflow standalone` (UI :8080)
 │   ├── api/
 │   │   └── run_local.sh          # the FastAPI API on localhost:8000 (/api/docs)
+│   ├── aws/                      # Phase 6 step 6: the EC2 server (aws login --profile ts-admin)
+│   │   ├── create_server.sh      # security groups, IAM role, t3.small, Elastic IP
+│   │   ├── user_data.sh          # first boot: Docker, Compose, swap
+│   │   ├── put_app_params.sh     # the API's 7 settings → SSM Parameter Store
+│   │   └── verify_server.sh      # checks over SSM: S3/RDS from a container, ports
+│   ├── deploy/                   # Phase 6 steps 7–8: HTTPS + deploys
+│   │   ├── deploy.sh             # on the server: settings, images, certificate, systemd
+│   │   ├── update.sh             # on the server, every 2 min: deploy the newest release
+│   │   ├── run_remote.sh         # run deploy.sh on the server over SSM (first/manual deploy)
+│   │   └── smoke_test.sh         # public HTTPS checks (CI release job, or a laptop)
 │   ├── docker/                   # Phase 6 step 5: the app's images
 │   │   ├── api.Dockerfile        # FastAPI + CPU PyTorch; OMP_NUM_THREADS=1; model baked in
-│   │   ├── web.Dockerfile        # Node builds web/out/ → nginx serves it
+│   │   ├── web.Dockerfile        # Node builds web/out/ → nginx serves it; /version.json
 │   │   ├── *.Dockerfile.dockerignore  # allowlist build contexts (never .env)
-│   │   ├── nginx.conf            # static pages + /api proxy; resumes kept off disk
+│   │   ├── nginx/                # 00-http.conf, app.locations (pages + /api, resumes off
+│   │   │                         #   disk), http.conf / https.conf, 40-talentsignal-tls.sh
+│   │   ├── test_tls.sh           # the web image's HTTPS + first-deploy modes (CI)
 │   │   └── run_local.sh          # build + start both at http://localhost/
-│   └── docker-compose.yml        # api + web (not used for Airflow)
+│   ├── docker-compose.yml        # api + web (not used for Airflow)
+│   └── docker-compose.prod.yml   # server additions: 443, certificates, no builds
 │
 ├── src/
 │   ├── ingestion/
@@ -190,6 +203,8 @@ talentsignal/
 │   ├── test_api_routes.py        # every endpoint via TestClient on stub data
 │   ├── api_stubs.py              # stub data + tiny XGBoost model for the API tests
 │   ├── test_docker.py            # OMP pin, allowlist contexts, API imports in image, nginx privacy
+│   ├── test_aws_scripts.py       # AWS scripts: no port 22, pinned Compose, only the app's settings
+│   ├── test_deploy_scripts.py    # deploy scripts: full SHA only, success after health, pointer
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
@@ -821,6 +836,12 @@ Decisions (2026-10-13):
   for resume uploads.
 - D5 Deploy via GitHub OIDC → AWS SSM Run Command: no SSH port open to the
   internet; the user creates the IAM role for GitHub in the console.
+  REVISED 2026-10-15 (user's choice): the account is a member of an AWS
+  Organization whose SCP explicitly denies iam:CreateOpenIDConnectProvider (and
+  CreateSAMLProvider), so GitHub OIDC is impossible. Instead the server pulls: CI
+  publishes the images to GHCR; a systemd timer on the server deploys the newest
+  release (infra/deploy/update.sh). No AWS credentials in GitHub, no SSH; SSM Run
+  Command (ts-admin from the laptop) only for the first / manual deploys.
 - D6 Docker: the app (and nginx) in Docker Compose, started by systemd.
 - D7–D10 (2026-10-14, the user pivoted the UI from Streamlit): D7 Next.js as a
   static export served by nginx, which proxies /api to the API (no Node
@@ -1145,6 +1166,41 @@ Step 6 Status: BUILT + VERIFIED (2026-10-15) — AWS server (the user's "Step 2"
   closed; the container saw the laptop's real IP (108.91.76.240), so nginx's
   per-visitor rate limit works on EC2 (Docker's port mapping keeps the client IP).
 - The app isn't running on the server yet: images reach GHCR with the deploy job.
+
+Steps 7–8 Status: BUILT (2026-10-15) — HTTPS, deploy script, CD (the user's Steps 3–5).
+- HTTPS (Let's Encrypt, $0): certbot in its own container (certbot/certbot:v5.8.0),
+  webroot challenge — not certbot's nginx plugin, which edits a host nginx (ours runs in
+  a container). /opt/talentsignal/letsencrypt (certbot writes, nginx mounts read-only)
+  and /opt/talentsignal/acme (challenge files). No email registered (nothing personal
+  sent to Let's Encrypt; expiry mail ended in 2025; renewal is automatic).
+- The web image picks its site config at start (infra/docker/nginx/40-talentsignal-tls.sh):
+  no TLS_HOST → http.conf (laptop, CI); TLS_HOST + certificate → https.conf (port 80:
+  ACME + 301 to https://<fixed host>; 443: TLS 1.2/1.3 Mozilla intermediate, HTTP/2,
+  HSTS max-age 1 day — sslip.io is a borrowed hostname); TLS_HOST, no certificate yet →
+  http.conf, which still serves the challenge. TLS_HOST is validated ([a-z0-9.-]).
+  infra/docker/test_tls.sh checks both server modes with a self-signed certificate (CI).
+- infra/deploy/deploy.sh <sha> (root on the server; flock'd): Parameter Store →
+  /opt/talentsignal/.env (600, values single-quoted, never printed) + image refs,
+  WEB_BIND=0.0.0.0, TLS_HOST=<EIP with dashes>.sslip.io (from IMDS); compose files and
+  update.sh of that commit from GitHub; compose pull + up --wait; first deploy:
+  certbot staging dry run, then the real certificate, restart web; systemd units
+  talentsignal.service (app at boot), talentsignal-certbot.timer (renew 03:17 / 15:17
+  ± 1 h, then nginx reload), talentsignal-update.timer (every 2 min); prune unused
+  images; HTTPS health check from the server; then records the commit in DEPLOYED.
+- CD = server pulls (D5 revised: OIDC blocked by the Organization's SCP):
+  - CI publish job (push to main, after test/dags/ml/api/web/docker; dbt runs on PRs):
+    pushes talentsignal-api then talentsignal-web to ghcr.io/ashup1101 as :<sha> and
+    :latest (labels: source repo, revision; /version.json in the web image), then checks
+    both are pullable anonymously (the server has no GitHub credentials).
+  - update.sh on the server: pulls web:latest (the release pointer, pushed last), reads
+    its revision label, runs deploy.sh for a new commit; a failed commit is not retried
+    (LAST_FAILED) until a newer one arrives — Let's Encrypt limits failed validations.
+  - CI release job: waits (≤ 20 min) until https://$APP_HOST/version.json shows the
+    commit, then infra/deploy/smoke_test.sh (health, Let's Encrypt certificate,
+    http → https 301, HSTS, pages, /api/overview from RDS, the made-up sample resume
+    analyzed). Repo variable APP_HOST=77-113-138-96.sslip.io.
+- First deploy (bootstraps the timers): infra/deploy/run_remote.sh <instance> <sha>
+  over SSM with ts-admin.
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their

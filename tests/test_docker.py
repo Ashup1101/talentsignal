@@ -80,10 +80,33 @@ def test_api_container_gets_only_what_it_reads() -> None:
 
 
 def test_nginx_keeps_resumes_off_disk() -> None:
-    conf = (DOCKER / "nginx.conf").read_text()
+    conf = (DOCKER / "nginx" / "app.locations").read_text()
     analyze = conf[conf.index("location = /api/analyze") :]
     analyze = analyze[: analyze.index("}")]
 
     assert "proxy_request_buffering off;" in analyze
     assert re.search(r"client_body_buffer_size\s+6m;", analyze)
     assert re.search(r"client_max_body_size\s+6m;", analyze)
+
+
+def test_https_redirect_uses_the_fixed_host_and_tls_host_is_validated() -> None:
+    https = (DOCKER / "nginx" / "https.conf").read_text()
+    selector = (DOCKER / "nginx" / "40-talentsignal-tls.sh").read_text()
+
+    assert "return 301 https://__TLS_HOST__$request_uri;" in https  # never the Host header
+    assert "$host" not in https
+    assert "*[!a-z0-9.-]*" in selector  # TLS_HOST goes into sed and file paths
+    assert re.search(r"COPY --chmod=755 infra/docker/nginx/40-talentsignal-tls\.sh", (DOCKER / "web.Dockerfile").read_text())
+
+
+def test_server_compose_never_builds_and_mounts_certificates_read_only() -> None:
+    yaml = pytest.importorskip("yaml")
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    Loader.add_constructor("!reset", lambda loader, node: None)  # compose's override tag
+    prod = yaml.load((ROOT / "infra" / "docker-compose.prod.yml").read_text(), Loader=Loader)
+
+    assert all(svc["build"] is None for svc in prod["services"].values())
+    assert all(v.endswith(":ro") for v in prod["services"]["web"]["volumes"])
