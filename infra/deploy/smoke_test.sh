@@ -18,8 +18,10 @@ for _ in $(seq 12); do  # the containers may still be settling
 done
 ok "GET /api/health" "$(curl -fsS --max-time 10 "$URL/api/health")"  # curl verifies the certificate
 
+# `|| true`: LibreSSL's s_client (macOS) exits 1 when its input closes, even after a good
+# handshake; the content check below is what decides.
 cert=$(openssl s_client -connect "$HOST:443" -servername "$HOST" </dev/null 2>/dev/null \
-  | openssl x509 -noout -issuer -enddate)
+  | openssl x509 -noout -issuer -enddate) || true
 [[ "$cert" == *"Let's Encrypt"* ]] || fail "certificate: $cert"
 ok "certificate" "$(tr '\n' ' ' <<<"$cert")"
 

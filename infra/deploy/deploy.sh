@@ -57,7 +57,7 @@ aws ssm get-parameters-by-path --region "$REGION" --path /talentsignal/app --wit
 } > .env.new
 rm -f .env.params
 mv .env.new .env
-log "settings: $(grep -c "^[A-Z_]*='" .env) values from Parameter Store"
+log "settings: $(grep -c "^[A-Z0-9_]*='" .env) values from Parameter Store"
 umask 022
 
 # --- 2. Files of this commit: compose files + the release checker -------------------------
@@ -79,6 +79,7 @@ certbot() {
   docker run --rm -v "$DIR/letsencrypt:/etc/letsencrypt" -v "$DIR/acme:/var/www/acme" "$CERTBOT" "$@"
 }
 if [[ ! -f "letsencrypt/live/$TLS_HOST/fullchain.pem" ]]; then
+  docker pull --quiet "$CERTBOT" >/dev/null
   # No email: Let's Encrypt no longer sends expiry mail, and renewal is automatic (step 5).
   args=(certonly --webroot -w /var/www/acme -d "$TLS_HOST" --non-interactive --agree-tos
         --register-unsafely-without-email)
