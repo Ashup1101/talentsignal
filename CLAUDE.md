@@ -1206,6 +1206,11 @@ Steps 7–8 Status: BUILT + LIVE (2026-10-15) — HTTPS, deploy script, CD (the 
 - Fixed after the first deploy: smoke_test.sh tolerated LibreSSL's s_client exit 1 on
   macOS (handshake fine); deploy.sh's settings count missed S3_CURATED_BUCKET (digit
   in the name; the value was always written).
+- FOUND on main (PR #19's CI): `compose up --wait` returned as soon as the web
+  container ran (no healthcheck), and the next curl hit nginx before it listened
+  (connection reset; the PR run passed by timing). Fix: /healthz on port 80 in every
+  mode + HEALTHCHECK (start interval 1 s) in the web image, so --wait means "serving";
+  5/5 immediate requests after up --wait OK locally. Same race existed in deploy.sh.
 - ts-admin sessions expire (~hours): `aws login --profile ts-admin --region us-east-2`
   again before SSM work. Deploys themselves need no AWS login.
 - HTTPS (Let's Encrypt, $0): certbot in its own container (certbot/certbot:v5.8.0),

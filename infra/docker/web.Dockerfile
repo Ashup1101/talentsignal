@@ -27,3 +27,8 @@ COPY --from=build /web/out /usr/share/nginx/html
 ARG GIT_SHA=local
 RUN printf '{"commit":"%s"}\n' "$GIT_SHA" > /usr/share/nginx/html/version.json
 LABEL org.opencontainers.image.revision=$GIT_SHA
+
+# Ready = nginx answers on port 80 (/healthz, every mode), so `docker compose up --wait`
+# returns only once the site is served — not as soon as the container starts.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --start-interval=1s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1/healthz || exit 1
