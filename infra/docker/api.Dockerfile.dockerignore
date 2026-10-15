@@ -1,0 +1,13 @@
+# Allowlist: only what the API image needs reaches the build (never .env, data or venvs).
+*
+!requirements-app.txt
+!src/api/*.py
+!src/ml/artifacts.py
+!src/ml/embeddings.py
+!src/ml/features.py
+!src/ml/resume_features.py
+!src/skills/*.py
+!src/processing/__init__.py
+!src/processing/postgres.py
+!src/ingestion/__init__.py
+!src/ingestion/s3_utils.py

@@ -78,7 +78,13 @@ talentsignal/
 │   │   └── run_local.sh          # env vars + `airflow standalone` (UI :8080)
 │   ├── api/
 │   │   └── run_local.sh          # the FastAPI API on localhost:8000 (/api/docs)
-│   └── docker-compose.yml        # Phase 6 app containers (not used for Airflow)
+│   ├── docker/                   # Phase 6 step 5: the app's images
+│   │   ├── api.Dockerfile        # FastAPI + CPU PyTorch; OMP_NUM_THREADS=1; model baked in
+│   │   ├── web.Dockerfile        # Node builds web/out/ → nginx serves it
+│   │   ├── *.Dockerfile.dockerignore  # allowlist build contexts (never .env)
+│   │   ├── nginx.conf            # static pages + /api proxy; resumes kept off disk
+│   │   └── run_local.sh          # build + start both at http://localhost/
+│   └── docker-compose.yml        # api + web (not used for Airflow)
 │
 ├── src/
 │   ├── ingestion/
@@ -183,6 +189,7 @@ talentsignal/
 │   ├── test_api_logic.py         # logic + serving on stub data; OpenMP regression
 │   ├── test_api_routes.py        # every endpoint via TestClient on stub data
 │   ├── api_stubs.py              # stub data + tiny XGBoost model for the API tests
+│   ├── test_docker.py            # OMP pin, allowlist contexts, API imports in image, nginx privacy
 │   ├── conftest.py               # OMP_NUM_THREADS=1 (PyTorch/XGBoost OpenMP clash)
 │   └── fixtures/                 # resume_sample.pdf (made up) + make_resume_pdf.py (its generator)
 │
@@ -1045,6 +1052,61 @@ Frontend Status: BUILT (2026-10-14) — web/ (PR B).
   (the user's call). The dev server binds 127.0.0.1 (it was on the LAN);
   infra/api/run_local.sh allows both localhost:3000 and 127.0.0.1:3000.
 - web/AGENTS.md is written by Next.js itself (bundled-docs pointer); kept.
+
+Step 5 Status: BUILT (2026-10-15) — Docker, local (no AWS yet).
+- Two images, both built from the repo root with allowlist build contexts
+  (infra/docker/*.Dockerfile.dockerignore: `*` then the needed files; .env can't
+  reach an image):
+  - api (infra/docker/api.Dockerfile): python:3.11-slim; ENV OMP_NUM_THREADS=1
+    (non-negotiable, also pinned in src/api/__init__.py); libgomp1 for XGBoost;
+    CPU PyTorch then requirements-app.txt, both --no-deps (the user's notes
+    called it requirements-server.txt — the server lock is requirements-app.txt);
+    all-MiniLM-L6-v2 at its pinned revision baked in at build (HF_HOME=/opt/hf,
+    HF_HUB_OFFLINE=1: no Hugging Face calls at run time); non-root user; one
+    uvicorn worker; healthcheck on /api/health.
+  - web (infra/docker/web.Dockerfile): node:24-slim runs npm ci + next build →
+    web/out/ copied onto nginx:1.30-alpine. An image (not a mounted web/out/)
+    because the server has no Node: EC2 pulls both images from GHCR, so the CD
+    job (step 8) pushes talentsignal-web next to talentsignal-api.
+- infra/docker/nginx.conf: static pages (trailingSlash folders, 404.html,
+  /_next/static cached for good, HTML revalidated); /api/ → api:8000; security
+  headers. /api/analyze: 6 MB cap (the API's 5 MB check answers first),
+  client_body_buffer_size 6m + proxy_request_buffering off so a resume is never
+  written to nginx's disk (its default spills bodies > 16 KB to a temp file);
+  rate limit 20/min per visitor, burst 10. nginx's own 413 / 429 / 502–504 answer
+  in the API's {detail, code} JSON, which the frontend shows.
+- infra/docker-compose.yml: api (not published; expose 8000) + web
+  (${WEB_BIND:-127.0.0.1}:${WEB_PORT:-80}:80; server: WEB_BIND=0.0.0.0). The api
+  container gets only the 9 variables it reads (RDS_HOST/PORT/DB, APP_DB_USER/
+  PASSWORD, AWS_REGION, S3_CURATED_BUCKET + laptop-only AWS keys; on EC2 the
+  instance role) — never RDS_USER/RDS_PASSWORD, RAPIDAPI_KEY or DATABRICKS_TOKEN.
+- infra/docker/run_local.sh: checks .env and Docker, then `compose up --build
+  --wait` → http://localhost/ (docs /api/docs).
+- Verified locally (2026-10-15, Colima, arm64): both images build in ~2 min
+  (cold); api image ~2.2 GB uncompressed (pip 1.9 GB: torch 656 MB, xgboost 227,
+  pyarrow 143, scipy 122, transformers 120; model 92 MB) — web 104 MB. Through
+  nginx: health, pages, 301 /analyze → /analyze/, 404 page; /api/overview from
+  RDS as app_reader (1.1 s cold); sample resume analyzed in 0.99 s; 415 non-PDF,
+  413 at 5.5 MB (API) and 7 MB (nginx, JSON), 429 after the burst; 0 files in
+  nginx's temp dirs after uploads; no resume text in logs; OMP_NUM_THREADS=1, user
+  app; API 768 MiB RAM after an analysis (t3.small: 2 GB → add swap on EC2); the
+  image embeds with --network none.
+- Possible later saving (needs approval: dependency change): xgboost-cpu on the
+  server (CPU-only build, far smaller than xgboost's 227 MB).
+- To check on EC2: nginx sees the real client IP (locally every request comes from
+  the Docker gateway, so the per-visitor rate limit can't be tested here).
+- CI job "Docker build (API + web images)": builds both (linux/amd64, GHA layer
+  cache, not pushed), runs the API image with --network none (OMP, imports,
+  offline model), then compose up → health, pages, 404. tests/test_docker.py
+  guards the OMP pin, allowlists, every module the API imports being in the
+  image (walks src/api's imports), the api environment and nginx's no-disk
+  settings.
+- Laptop Docker: Colima 0.10 (Homebrew: colima, docker, docker-compose,
+  docker-buildx; ~/.docker/config.json → cliPluginsExtraDirs), VZ VM 2 CPU /
+  4 GB / 40 GB. FOUND: this Mac's launchd SSH agent hangs (`ssh-add -l` never
+  answers), which stalled Colima's start at "Waiting for … ssh" (VZ and QEMU
+  alike). Start it with `SSH_AUTH_SOCK= colima start`. The agent hang affects
+  any ssh on this Mac; fixing it is the user's call.
 
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their

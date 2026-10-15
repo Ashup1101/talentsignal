@@ -1,8 +1,8 @@
 name: CI
 
-# pytest, the Airflow DAG tests and the ML tests run on every push / PR to main; dbt build runs
-# on PRs against a throwaway Postgres. Planned: app redeploy on push to main
-# (Phase 6).
+# pytest, the Airflow DAG tests, the ML / API / web tests and the Docker image build run on
+# every push / PR to main; dbt build runs on PRs against a throwaway Postgres. Planned: push
+# the images to GHCR and redeploy the app on push to main (Phase 6).
 on:
   push:
     branches: [main]
@@ -231,3 +231,61 @@ jobs:
       # The static export nginx will serve (out/).
       - name: Build
         run: npm run build
+
+  docker:
+    name: Docker build (API + web images)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Both images as the server runs them (linux/amd64, like the EC2 t3.small), loaded
+      # locally, not pushed: pushing to GHCR happens on merge to main (deploy job, later).
+      # Layers are cached in GitHub's Actions cache, so unchanged dependencies don't rebuild.
+      - name: Build the API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          tags: talentsignal-api:ci
+          load: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build the web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          tags: talentsignal-web:ci
+          load: true
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      # The API image alone, with no network: OpenMP pinned, the API imports, and the
+      # baked-in embedding model loads without Hugging Face.
+      - name: API image works offline
+        run: |
+          docker run --rm --network none talentsignal-api:ci python -c "
+          import os; assert os.environ['OMP_NUM_THREADS'] == '1'
+          import src.api.main
+          from src.ml.embeddings import load_model; load_model()
+          print('ok')"
+
+      # Both containers together (no database here: /api/health needs none).
+      - name: Compose smoke test
+        env:
+          API_IMAGE: talentsignal-api:ci
+          WEB_IMAGE: talentsignal-web:ci
+        run: |
+          docker compose -f infra/docker-compose.yml up --no-build --detach --wait
+          curl -fsS http://127.0.0.1/api/health
+          curl -fsS http://127.0.0.1/ | grep -q "TalentSignal"
+          curl -fsS http://127.0.0.1/analyze/ | grep -q "Resume Analyzer"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/no-such-page/)" = 404
+
+      - name: Container logs
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs
