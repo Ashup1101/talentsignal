@@ -41,6 +41,31 @@ instead of a market dashboard); update the resume to match what is built.
 Numbers above are targets, not facts. Measure them on real data and report
 the actual result (e.g. real held-out MAE), even if it misses the target.
 
+Resume bullets as built (measured 2026-10-15; replace the original description):
+- Built an end-to-end job-market pipeline on AWS: a nightly Airflow 3 DAG (9 tasks)
+  ingests JSearch and BLS data into S3 under a hard API budget, deduplicates postings
+  and extracts skills with PySpark / Delta Lake (731 unique postings across 5 roles ×
+  5 metros so far), and models a dbt star schema (dim_role, dim_location,
+  fact_job_postings + trend, salary and skill-demand marts; 100+ dbt tests) on RDS
+  PostgreSQL.
+- Added NLP + ML: spaCy rule-based years-of-experience extraction (74% of postings;
+  "level unknown" cut from 43% to 14%), sentence-transformers embeddings + BERTopic
+  topics, an XGBoost salary model tracked in MLflow (employer-grouped 5-fold CV MAE
+  $34K, 17% better than a per-role median baseline), and a Prophet demand forecaster
+  gated until 12 weekly data points exist.
+- Shipped a resume intelligence web app (Next.js static export + FastAPI) on EC2
+  behind nginx with Let's Encrypt HTTPS: a PDF is parsed in memory (pdfplumber + the
+  pipeline's skill dictionary, no LLM) into match % per role, a salary estimate, the
+  most in-demand missing skills and embedding-matched postings in ~1 s.
+- Automated delivery with GitHub Actions (9 jobs, incl. dbt against a throwaway
+  Postgres, Docker image builds and HTTPS tests) and pull-based CD: images go to GHCR,
+  the server deploys each release itself and CI runs a public smoke test; no AWS keys
+  in CI, no SSH port.
+Versus the original targets: 731 postings, not 50K+ (free JSearch plan: ~200
+requests/month); MAE $34K vs < $9K (≈ 280 salaried postings); PySpark runs locally
+(Databricks only hosts MLflow; Phase 4b not done); the DAG uses BashOperator, not
+DatabricksRunNowOperator.
+
 ---
 
 ## Tech stack (use exactly these, no substitutions without asking)
@@ -1167,7 +1192,22 @@ Step 6 Status: BUILT + VERIFIED (2026-10-15) — AWS server (the user's "Step 2"
   per-visitor rate limit works on EC2 (Docker's port mapping keeps the client IP).
 - The app isn't running on the server yet: images reach GHCR with the deploy job.
 
-Steps 7–8 Status: BUILT (2026-10-15) — HTTPS, deploy script, CD (the user's Steps 3–5).
+Steps 7–8 Status: BUILT + LIVE (2026-10-15) — HTTPS, deploy script, CD (the user's Steps 3–5).
+- LIVE at https://77-113-138-96.sslip.io/ (commit 1a8d252, PR #18). First deploy over
+  SSM in 83 s: images pulled, Let's Encrypt certificate (intermediate YE2, valid to
+  2027-01-13; staging dry run first), nginx switched to HTTPS, systemd units installed;
+  disk 6.3 GB used / 14 GB free; API 575 MiB RAM, 933 MB available.
+- CI on main: publish 47 s (layer cache; both packages public: anonymous pull check
+  passed), release job saw the live commit and the public smoke test passed from
+  GitHub's runner: health, Let's Encrypt certificate, 301 http → https, HSTS, pages,
+  731 postings from RDS, sample resume → 8 skills, $134,979, 10 postings. Same result
+  from the laptop. Timers: update every 2 min (no-op run 1.2 s CPU); renewal twice a
+  day.
+- Fixed after the first deploy: smoke_test.sh tolerated LibreSSL's s_client exit 1 on
+  macOS (handshake fine); deploy.sh's settings count missed S3_CURATED_BUCKET (digit
+  in the name; the value was always written).
+- ts-admin sessions expire (~hours): `aws login --profile ts-admin --region us-east-2`
+  again before SSM work. Deploys themselves need no AWS login.
 - HTTPS (Let's Encrypt, $0): certbot in its own container (certbot/certbot:v5.8.0),
   webroot challenge — not certbot's nginx plugin, which edits a host nginx (ours runs in
   a container). /opt/talentsignal/letsencrypt (certbot writes, nginx mounts read-only)
