@@ -1,6 +1,6 @@
 "use client";
 
-import { Hourglass } from "lucide-react";
+import { Hourglass, LineChart } from "lucide-react";
 import { useState } from "react";
 import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts";
 
@@ -8,6 +8,8 @@ import { LabeledSelect } from "@/components/labeled-select";
 import { PageIntro } from "@/components/page-intro";
 import { ErrorAlert, LoadingBlock } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
@@ -17,7 +19,8 @@ import { percent, roleLabel } from "@/lib/format";
 import { useApi } from "@/lib/use-api";
 
 const TOP_N = 12;
-const shareConfig = { share: { label: "Share of postings", color: "var(--chart-2)" } } satisfies ChartConfig;
+const TABLE_ROWS = 25;
+const shareConfig = { share: { label: "Share of postings", color: "var(--chart-1)" } } satisfies ChartConfig;
 const forecastConfig = {
   share: { label: "Observed", color: "var(--chart-1)" },
   forecast: { label: "Forecast", color: "var(--chart-2)" },
@@ -27,6 +30,7 @@ const forecastConfig = {
 export function SkillsView() {
   const options = useApi(() => api.options(), []);
   const [role, setRole] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const roles = options.data?.roles ?? [];
   const chosen = role ?? (roles.includes("data engineer") ? "data engineer" : roles[0] ?? null);
   const demand = useApi(() => (chosen ? api.skills(chosen) : Promise.resolve(undefined)), [chosen]);
@@ -34,7 +38,7 @@ export function SkillsView() {
 
   return (
     <div className="grid gap-8">
-      <PageIntro title="Skill Demand">
+      <PageIntro title="Skill Demand" icon={LineChart} tone="amber">
         How often each role&apos;s postings mention each skill, and where demand is heading once enough weeks of
         postings are collected.
       </PageIntro>
@@ -62,7 +66,7 @@ export function SkillsView() {
                     <XAxis type="number" domain={[0, 1]} tickFormatter={(v: number) => percent(v)} />
                     <YAxis type="category" dataKey="skill" width={120} tickLine={false} axisLine={false} />
                     <ChartTooltip content={<ChartTooltipContent formatter={(v) => percent(Number(v))} />} />
-                    <Bar dataKey="share_of_postings" name="share" fill="var(--color-share)" radius={4} />
+                    <Bar dataKey="share_of_postings" name="share" fill="var(--color-share)" radius={[0, 6, 6, 0]} barSize={18} />
                   </BarChart>
                 </ChartContainer>
               </CardContent>
@@ -72,6 +76,7 @@ export function SkillsView() {
           <Card>
             <CardHeader>
               <CardTitle>All skills, ranked</CardTitle>
+              <CardDescription>{data.skills.length} skills mentioned by {roleLabel(data.role)} postings.</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
@@ -85,11 +90,13 @@ export function SkillsView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.skills.map((s) => (
+                  {(showAll ? data.skills : data.skills.slice(0, TABLE_ROWS)).map((s) => (
                     <TableRow key={s.skill}>
                       <TableCell className="tabular-nums text-muted-foreground">{s.rank}</TableCell>
                       <TableCell className="font-medium">{s.skill}</TableCell>
-                      <TableCell className="hidden capitalize text-muted-foreground sm:table-cell">{s.category.replaceAll("_", " ")}</TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        <Badge variant="outline" className="font-normal capitalize text-muted-foreground">{s.category.replaceAll("_", " ")}</Badge>
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Progress value={s.share_of_postings * 100} className="flex-1" aria-label={`${s.skill} share`} />
@@ -101,6 +108,13 @@ export function SkillsView() {
                   ))}
                 </TableBody>
               </Table>
+              {data.skills.length > TABLE_ROWS && (
+                <div className="mt-4 flex justify-center">
+                  <Button variant="outline" size="sm" onClick={() => setShowAll(!showAll)}>
+                    {showAll ? `Show the top ${TABLE_ROWS}` : `Show all ${data.skills.length} skills`}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>

@@ -1,27 +1,30 @@
 import type { LucideIcon } from "lucide-react";
 
+import { IconTile, type Tone } from "@/components/icon-tile";
 import { Card, CardContent } from "@/components/ui/card";
 
 export function Kpi({
   label,
   value,
   hint,
-  icon: Icon,
+  icon,
+  tone = "indigo",
 }: {
   label: string;
   value: string;
   hint?: string;
   icon?: LucideIcon;
+  tone?: Tone;
 }) {
   return (
-    <Card size="sm">
-      <CardContent className="grid gap-1">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {Icon && <Icon className="size-4" aria-hidden />}
-          {label}
+    <Card>
+      <CardContent className="flex items-start gap-3">
+        {icon && <IconTile icon={icon} tone={tone} />}
+        <div className="grid min-w-0 gap-0.5">
+          <div className="text-sm text-muted-foreground">{label}</div>
+          <div className="truncate text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
+          {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
         </div>
-        <div className="text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
-        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
       </CardContent>
     </Card>
   );
