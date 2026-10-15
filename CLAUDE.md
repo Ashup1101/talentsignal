@@ -1108,6 +1108,44 @@ Step 5 Status: BUILT (2026-10-15) — Docker, local (no AWS yet).
   alike). Start it with `SSH_AUTH_SOCK= colima start`. The agent hang affects
   any ssh on this Mac; fixing it is the user's call.
 
+Step 6 Status: BUILT + VERIFIED (2026-10-15) — AWS server (the user's "Step 2").
+- Cost confirmed by the user ("fine for a week of learning"): EC2 t3.small $15.18 +
+  EBS gp3 20 GB $1.60 + Elastic IP $3.65 ≈ $20.43/month (≈ $38 with RDS).
+- Access: talentsignal-dev stays S3-only (it can't describe EC2/RDS/IAM). Infra runs
+  with temporary console credentials: `aws login --profile ts-admin` (CLI v2.38; the
+  session is the AccountFullAccessRole role, not root). No long-lived admin keys.
+- Scripts (infra/aws/, re-runnable, reuse what exists; guarded by
+  tests/test_aws_scripts.py):
+  - create_server.sh: security group talentsignal-web (80 + 443 from anywhere, no 22);
+    RDS security group += 5432 from talentsignal-web; IAM role + instance profile
+    talentsignal-ec2 (AmazonSSMManagedInstanceCore + inline app-read: s3:GetObject on
+    models/salary/* and embeddings/* of talentsignal-curated-ash, ssm:GetParameter* on
+    /talentsignal/app/*); EC2 t3.small AL2023 x86_64 in RDS's VPC/AZ (default VPC,
+    us-east-2b), 20 GB gp3 encrypted, IMDSv2 hop limit 2, CPU credits standard, no
+    auto public IP, key pair talentsignal-key (emergency only); its own Elastic IP.
+  - user_data.sh (first boot): waits for the internet, 2 GB swap (swappiness 10),
+    Docker (AL2023 package) with logs capped 3 × 10 MB, Compose v5.6.0 plugin
+    (sha256-verified), /opt/talentsignal.
+  - put_app_params.sh: the 7 values the API reads → /talentsignal/app/* (String;
+    APP_DB_PASSWORD SecureString via aws/ssm), each through a private temp file. Not
+    "all of .env" (the user's first plan): the admin RDS password, RapidAPI key,
+    Databricks token and talentsignal-dev's keys stay off the server.
+  - verify_server.sh: via SSM Run Command only (no secrets in command text or output).
+- FOUND: the account's only Elastic IP (18.227.174.211) is RDS's public address (on
+  an amazon-rds network interface; the endpoint resolves to it) — not a spare one.
+  Left untouched; the server got a new Elastic IP (user approved). create_server.sh
+  only ever uses an address tagged Name=talentsignal-app.
+- Server: i-0b5ccbfa127db4eb2, Elastic IP 77.113.138.96 → HTTPS host (step 7)
+  77-113-138-96.sslip.io. SSM agent Online ~3 min after launch.
+- Verified 2026-10-15: bootstrap done; Docker 25.0.16, Compose v5.6.0, 2 GB swap,
+  1.47 GB RAM available before the app; role talentsignal-ec2; 7 parameters; from
+  inside a container: S3 head-object on the model card (instance role through IMDSv2,
+  2 hops) and RDS as app_reader over SSL (`app_reader|731`) through the security-group
+  rule; from the laptop: http://77.113.138.96/ → 200 (throwaway nginx), port 22
+  closed; the container saw the laptop's real IP (108.91.76.240), so nginx's
+  per-visitor rate limit works on EC2 (Docker's port mapping keeps the client IP).
+- The app isn't running on the server yet: images reach GHCR with the deploy job.
+
 Needs from earlier phases:
 - Phase 3 marts: skill frequency per role, recent postings with their
   skills, salary by skill.
