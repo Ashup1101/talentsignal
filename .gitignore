@@ -50,3 +50,6 @@ mlruns/
 
 # Streamlit secrets (the app reads .env / the environment instead; never commit secrets)
 .streamlit/secrets.toml
+
+# Project notes for Claude Code: kept local, not published
+CLAUDE.md
