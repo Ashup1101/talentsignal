@@ -189,7 +189,7 @@ the 20 Oct 2026 pipeline run).
 | Demand forecast (Prophet) | Built and tested; waiting for 12 weekly collections before it forecasts anything (3 so far) |
 | Pipeline | 9 Airflow tasks in about 3½ minutes |
 | App | A resume analysis takes about 1 second; the API uses ~0.6–0.8 GB of the server's 2 GB |
-| Cost | Running: EC2 + disk + IP ≈ $20/month, RDS ≈ $18/month. Paused: about $4/month (disks and S3) |
+| Cost | Running: EC2 + disk + IP ≈ $20/month, RDS ≈ $18/month. Paused: ≈ $4/month for the two disks and S3, plus up to $3.65 if AWS bills the stopped database's public IP |
 
 ## The learning journey
 
