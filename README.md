@@ -8,12 +8,14 @@ data and software roles, an estimated salary, the in-demand skills it's missing,
 postings it fits best.
 
 [![CI](https://github.com/Ashup1101/talentsignal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Ashup1101/talentsignal/actions/workflows/ci.yml)
-&nbsp;**Live: <https://77-113-138-96.sslip.io/>** · [API docs](https://77-113-138-96.sslip.io/api/docs)
+&nbsp;**Showcase: <https://ashup1101.github.io/talentsignal/>**
 
 ![Resume Analyzer: match ring, match by role and the salary estimate for the made-up sample resume](docs/images/analyzer.png)
 
-> Try it with the built-in **sample resume** (a made-up data engineer) or a text-based PDF
-> of your own. Resumes are read in memory and never stored, logged or shared.
+> **Live app paused.** The EC2 instance and the database are stopped to save costs; the
+> data, models and deployment are intact. To restart it, see
+> [Restarting the live app](#restarting-the-live-app). Screenshots below use the built-in
+> made-up sample resume. Resumes are read in memory and never stored, logged or shared.
 
 ---
 
@@ -93,7 +95,7 @@ flowchart LR
 - **PySpark + Delta Lake:** flatten, normalize (salaries annualized, states coded),
   deduplicate across collections, extract ~110 skills with a shared dictionary (pandas UDF).
 - **dbt on RDS PostgreSQL:** a star schema (`dim_role`, `dim_location`, `fact_job_postings`)
-  plus trend, salary-band and skill-demand marts; `dbt build` passes 106 models and tests.
+  plus trend, salary-band and skill-demand marts: 19 models, 86 data tests.
 - **NLP + ML:** years of experience from spaCy rules, posting embeddings
   (all-MiniLM-L6-v2), BERTopic topics, an XGBoost salary model tracked in MLflow, and a
   Prophet demand forecast that waits until each series has 12 weekly points.
@@ -153,7 +155,7 @@ sequenceDiagram
    files.
 2. **Containers:** Docker Compose runs the API and nginx. The API image pins
    `OMP_NUM_THREADS=1` and bakes in the embedding model, so it starts offline.
-3. **HTTPS:** a Let's Encrypt certificate for `77-113-138-96.sslip.io` (sslip.io maps the
+3. **HTTPS:** a Let's Encrypt certificate for `<server-ip>.sslip.io` (sslip.io maps the
    name to the IP, so no domain purchase), issued by certbot in a container; a systemd
    timer checks it for renewal twice a day. nginx switches itself from HTTP to HTTPS once the
    certificate exists.
@@ -164,7 +166,8 @@ sequenceDiagram
    arrives.
 5. **Verification:** CI waits for the live `/version.json` to show its commit and runs a
    public smoke test (certificate, redirect, HSTS, pages, database, the sample resume end
-   to end). A typical deploy is live about a minute after the images are published.
+   to end). A typical deploy is live about a minute after the images are published. While
+   the app is paused, the repository variable `APP_HOST` is unset and this job is skipped.
 
 Why the server *pulls* instead of CI pushing: the AWS account belongs to an AWS
 Organization whose policy forbids creating the GitHub OIDC identity provider. Rather than
@@ -173,19 +176,20 @@ same hands-off pipeline, with **no AWS credentials in CI at all**.
 
 ## Results, measured
 
-Targets came from the original project description; these are the real numbers.
+Targets came from the original project description; these are the real numbers (as of
+the 20 Oct 2026 pipeline run).
 
 | What | Result |
 |---|---|
-| Postings | **731** unique postings (283 with a salary) across 5 roles × 5 metros (target was 50K+; the free API plan allows ~200 requests a month) |
+| Postings | **869** unique postings (333 with a salary) across 5 roles × 5 metros (target was 50K+; the free API plan allows ~200 requests a month) |
 | Deduplication | JSearch issues a new id for the same posting on every collection (0 repeats in 728 sightings), so dedup is by normalized title + employer + city |
 | Experience extraction | 74% of postings state years of experience; "level unknown" fell from 43% to 14% |
 | Topics | 9 BERTopic topics, stable across reruns on the same data; about half the postings stay unassigned rather than forced into a topic |
-| Salary model (XGBoost) | Cross-validated error **$34K** (5 folds grouped by employer) vs $37K role × seniority median, $41K role median, $49K global median. Target was < $9K: missed, with ~280 salaried postings |
-| Demand forecast (Prophet) | Built and tested; waiting for 12 weekly collections before it forecasts anything |
+| Salary model (XGBoost) | Cross-validated error **$35.7K** (5 folds grouped by employer): 20% lower than the role median ($44.4K), 9% lower than role × seniority ($39.1K), vs $50.5K global median. Target was < $9K: missed, with 333 salaried postings |
+| Demand forecast (Prophet) | Built and tested; waiting for 12 weekly collections before it forecasts anything (3 so far) |
 | Pipeline | 9 Airflow tasks in about 3½ minutes |
 | App | A resume analysis takes about 1 second; the API uses ~0.6–0.8 GB of the server's 2 GB |
-| Cost | EC2 + disk + IP ≈ $20/month; RDS ≈ $18/month |
+| Cost | Running: EC2 + disk + IP ≈ $20/month, RDS ≈ $18/month. Paused: about $4/month (disks and S3) |
 
 ## The learning journey
 
@@ -287,14 +291,31 @@ cd web && npm run dev           # frontend on :3000
 ```
 
 The server was created with `infra/aws/create_server.sh`, `put_app_params.sh` and
-`verify_server.sh`, using temporary console credentials (`aws login`). Deploys need
-nothing by hand; a manual one, and the public checks:
+`verify_server.sh`, using temporary console credentials (`aws login`). While it runs,
+deploys need nothing by hand.
+</details>
+
+### Restarting the live app
+
+The app is paused: EC2 and RDS are stopped, not deleted, and the server's Elastic IP was
+released (an unattached public IP is billed). Everything else (the disk, settings in
+Parameter Store, images in GHCR, S3 data) is kept. To bring it back:
 
 ```bash
-infra/deploy/run_remote.sh <instance-id> "$(git rev-parse origin/main)"
-infra/deploy/smoke_test.sh 77-113-138-96.sslip.io
+aws login --profile ts-admin --region us-east-2
+export AWS_PROFILE=ts-admin AWS_REGION=us-east-2
+aws rds start-db-instance --db-instance-identifier talentsignal-db
+aws ec2 start-instances --instance-ids i-0b5ccbfa127db4eb2
+aws rds wait db-instance-available --db-instance-identifier talentsignal-db
+
+infra/aws/create_server.sh      # reuses everything; attaches a new Elastic IP (new hostname)
+gh variable set APP_HOST --body "<new-ip-with-dashes>.sslip.io"   # turns the CI release job back on
+infra/deploy/run_remote.sh i-0b5ccbfa127db4eb2 "$(git rev-parse origin/main)"   # new certificate on first deploy
+infra/deploy/smoke_test.sh "<new-ip-with-dashes>.sslip.io"
 ```
-</details>
+
+AWS restarts a stopped RDS instance by itself after 7 days, so stop it again if the
+pause lasts longer.
 
 ## Repository layout
 

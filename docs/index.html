@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TalentSignal: resume intelligence from real job postings</title>
+<meta name="description" content="A resume intelligence platform: upload your resume, see how it matches real job postings, get a salary estimate, and find the skills worth adding. Built end to end: PySpark, dbt, Airflow, NLP + ML, FastAPI, Next.js, AWS, CI/CD.">
+<meta property="og:title" content="TalentSignal: resume intelligence from real job postings">
+<meta property="og:description" content="End-to-end data engineering + ML project: nightly pipeline, dbt star schema, XGBoost salary model, semantic job matching, deployed on AWS with CI/CD.">
+<meta property="og:image" content="https://ashup1101.github.io/talentsignal/images/analyzer.png">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0b0c18">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0c18;
+    --bg-2: #0f1122;
+    --surface: #14162b;
+    --surface-2: #1a1d38;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --text: #eceefb;
+    --muted: #a3a8c6;
+    --faint: #7a7fa3;
+    --indigo: #818cf8;
+    --indigo-strong: #6366f1;
+    --teal: #2dd4bf;
+    --amber: #fbbf24;
+    --rose: #fb7185;
+    --sky: #38bdf8;
+    --radius: 16px;
+    --max: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img { max-width: 100%; height: auto; display: block; }
+  code, .mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+  section { padding: 88px 0; }
+  .eyebrow {
+    display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--indigo); margin-bottom: 12px;
+  }
+  h2 { font-size: clamp(28px, 4vw, 40px); line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 14px; }
+  h3 { font-size: 18px; line-height: 1.3; margin: 0 0 8px; }
+  .lead { color: var(--muted); font-size: 18px; max-width: 680px; margin: 0; }
+  .card {
+    background: linear-gradient(180deg, var(--surface), var(--bg-2));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+
+  /* ---- nav ---- */
+  nav.top {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(11, 12, 24, 0.78);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.top .wrap { display: flex; align-items: center; gap: 24px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--text); }
+  .brand:hover { text-decoration: none; }
+  .logo {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--indigo-strong); box-shadow: 0 0 0 1px rgba(255,255,255,.12) inset;
+  }
+  nav.top .links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; }
+  nav.top .links a { color: var(--muted); }
+  nav.top .links a:hover { color: var(--text); text-decoration: none; }
+  @media (max-width: 760px) { nav.top .links { display: none; } nav.top .gh { margin-left: auto; } }
+
+  /* ---- buttons ---- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px;
+    border-radius: 12px; font-weight: 600; font-size: 15px; border: 1px solid var(--border-strong);
+    color: var(--text); background: rgba(255,255,255,.03); transition: background .15s, border-color .15s;
+  }
+  .btn:hover { text-decoration: none; background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.22); }
+  .btn.primary { background: var(--indigo-strong); border-color: transparent; color: #fff; }
+  .btn.primary:hover { background: #5458e6; }
+  .btn.small { height: 36px; padding: 0 14px; font-size: 14px; border-radius: 10px; }
+
+  /* ---- hero ---- */
+  header.hero { position: relative; overflow: hidden; padding: 84px 0 64px; }
+  header.hero::before {
+    content: ""; position: absolute; inset: -20% -10% auto -10%; height: 640px; z-index: -1;
+    background:
+      radial-gradient(600px 320px at 22% 20%, rgba(99, 102, 241, .32), transparent 70%),
+      radial-gradient(520px 300px at 85% 10%, rgba(45, 212, 191, .16), transparent 70%);
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+    border: 1px solid var(--border-strong); border-radius: 999px; padding: 6px 12px; background: rgba(255,255,255,.03);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 4px rgba(251,191,36,.15); }
+  .hero h1 {
+    font-size: clamp(44px, 8vw, 84px); line-height: 1; letter-spacing: -0.04em; margin: 22px 0 18px;
+    background: linear-gradient(90deg, #fff 0%, #c7cbff 55%, var(--teal) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .tagline { font-size: clamp(18px, 2.4vw, 22px); color: #d3d6f0; max-width: 760px; margin: 0 0 22px; }
+  .status {
+    display: flex; gap: 12px; align-items: flex-start; max-width: 760px; margin: 0 0 28px;
+    border: 1px solid rgba(251,191,36,.25); background: rgba(251,191,36,.06); color: #f3e3b5;
+    border-radius: 12px; padding: 12px 14px; font-size: 14.5px;
+  }
+  .status .dot { margin-top: 7px; flex: none; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .frame {
+    margin-top: 56px; border-radius: 18px; border: 1px solid var(--border-strong); overflow: hidden;
+    background: var(--surface); box-shadow: 0 40px 120px -40px rgba(99,102,241,.45), 0 0 0 1px rgba(255,255,255,.02);
+  }
+  .frame .chrome { display: flex; gap: 7px; align-items: center; height: 38px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+  .frame .chrome i { width: 11px; height: 11px; border-radius: 50%; background: #2a2d4a; }
+  .frame .chrome span { margin-left: 12px; font-size: 12.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  /* ---- stats ---- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .stat { background: var(--bg-2); padding: 22px 20px; }
+  .stat b { display: block; font-size: 30px; line-height: 1.1; letter-spacing: -0.02em; }
+  .stat span { display: block; color: var(--muted); font-size: 13.5px; margin-top: 6px; }
+  .note { color: var(--faint); font-size: 13px; margin: 14px 0 0; }
+
+  /* ---- features ---- */
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 36px; }
+  .icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 16px; }
+  .icon svg { width: 22px; height: 22px; }
+  .i-indigo { background: rgba(129,140,248,.14); color: var(--indigo); }
+  .i-teal { background: rgba(45,212,191,.13); color: var(--teal); }
+  .i-amber { background: rgba(251,191,36,.13); color: var(--amber); }
+  .i-rose { background: rgba(251,113,133,.13); color: var(--rose); }
+  .card p { color: var(--muted); margin: 0; font-size: 15px; }
+  .card .kv { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 12.5px; color: #cdd1f7; background: rgba(129,140,248,.12); border: 1px solid rgba(129,140,248,.2); border-radius: 999px; padding: 3px 10px; }
+
+  /* ---- screenshots ---- */
+  .shots { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; margin-top: 36px; }
+  .shots figure { margin: 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .shots figcaption { font-size: 13.5px; color: var(--muted); padding: 10px 14px; border-top: 1px solid var(--border); }
+  .shots .stack { display: grid; gap: 16px; }
+  .shots .phone { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .shots { grid-template-columns: 1fr; } }
+
+  /* ---- architecture ---- */
+  .arch { display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px; margin-top: 36px; align-items: start; }
+  @media (max-width: 900px) { .arch { grid-template-columns: 1fr; } }
+  .flow { display: grid; gap: 0; }
+  .node {
+    position: relative; display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px;
+  }
+  .node .n { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-weight: 600; font-size: 13px; }
+  .node b { display: block; font-size: 15.5px; }
+  .node small { display: block; color: var(--muted); font-size: 13.5px; line-height: 1.45; margin-top: 2px; }
+  .link { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 0 16px; min-height: 40px; align-items: center; }
+  .link .line { justify-self: center; width: 2px; height: 100%; min-height: 40px; background: linear-gradient(var(--indigo-strong), rgba(99,102,241,.25)); position: relative; }
+  .link .line::after { content: ""; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: rgba(129,140,248,.6); }
+  .link span { color: var(--faint); font-size: 13px; }
+  .node.serve { border-color: rgba(129,140,248,.4); background: linear-gradient(180deg, #1b1e3d, var(--surface)); }
+  .rails { display: grid; gap: 16px; }
+  .rail h3 { display: flex; align-items: center; gap: 10px; }
+  .rail ul { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .rail li { color: var(--muted); font-size: 14.5px; padding-left: 18px; position: relative; }
+  .rail li::before { content: ""; position: absolute; left: 0; top: 10px; width: 7px; height: 7px; border-radius: 2px; background: var(--indigo); }
+
+  /* ---- shipping ---- */
+  .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 36px; counter-reset: step; }
+  @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
+  .step { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .step::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 26px; height: 26px;
+    border-radius: 8px; background: rgba(129,140,248,.16); color: var(--indigo); font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .step b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .step small { color: var(--muted); font-size: 13.5px; line-height: 1.5; display: block; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+  .fact { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border-radius: 14px; border: 1px solid var(--border); background: rgba(255,255,255,.02); }
+  .fact svg { flex: none; width: 20px; height: 20px; color: var(--teal); margin-top: 2px; }
+  .fact p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .fact b { color: var(--text); }
+
+  /* ---- stack ---- */
+  .stack-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 36px; }
+  .stack-groups h3 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 14px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pills span { font-size: 13.5px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: rgba(255,255,255,.03); color: #dfe2f8; }
+
+  /* ---- timeline ---- */
+  .timeline { margin-top: 36px; display: grid; gap: 0; position: relative; }
+  .phase { display: grid; grid-template-columns: 56px 1fr; gap: 18px; padding-bottom: 26px; position: relative; }
+  .phase:not(:last-child)::after { content: ""; position: absolute; left: 27px; top: 50px; bottom: 0; width: 2px; background: var(--border-strong); }
+  .phase .num { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font-weight: 700; font-size: 18px;
+    background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--indigo); }
+  .phase h3 { margin-top: 6px; }
+  .phase p { margin: 0; color: var(--muted); font-size: 15px; max-width: 760px; }
+
+  /* ---- problems ---- */
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 36px; }
+  .problem .k { font-size: 12.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--rose); margin-bottom: 10px; display: block; }
+  .problem p + p { margin-top: 10px; }
+  .problem .fix { color: #c9f3ea; }
+  .problem .fix b { color: var(--teal); }
+  .metric { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; padding: 12px 14px; border-radius: 12px;
+    background: rgba(255,255,255,.03); border: 1px solid var(--border); }
+  .metric b { font-size: 24px; letter-spacing: -0.02em; line-height: 1; }
+  .metric small { display: block; color: var(--faint); font-size: 12px; margin-top: 4px; }
+  .metric .arrow { color: var(--faint); }
+
+  /* ---- footer ---- */
+  footer { border-top: 1px solid var(--border); padding: 40px 0 56px; color: var(--muted); font-size: 14.5px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: center; justify-content: space-between; }
+  footer .links { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+  .sep { border: 0; border-top: 1px solid var(--border); margin: 0; }
+</style>
+</head>
+<body>
+
+<nav class="top" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <span class="logo" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="#fff"/><path d="M12 12 19 5"/></svg>
+      </span>
+      TalentSignal
+    </a>
+    <div class="links">
+      <a href="#what">What it does</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#shipping">How it ships</a>
+      <a href="#journey">Build log</a>
+      <a href="#problems">Problems solved</a>
+    </div>
+    <a class="btn small gh" href="https://github.com/Ashup1101/talentsignal">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="pill">End-to-end data engineering + ML portfolio project</span>
+    <h1>TalentSignal</h1>
+    <p class="tagline">A resume intelligence platform: upload your resume, see how it matches real job postings, get a salary estimate, and find the skills worth adding.</p>
+    <p class="status"><span class="dot" aria-hidden="true"></span><span><b>Live app currently paused:</b> the EC2 instance is stopped to save costs. The data pipeline, models and deployment are intact and can be restarted.</span></p>
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/Ashup1101/talentsignal">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View the code on GitHub
+      </a>
+      <a class="btn" href="#architecture">See the architecture</a>
+    </div>
+    <div class="frame">
+      <div class="chrome" aria-hidden="true"><i></i><i></i><i></i><span>Resume Analyzer · results for the made-up sample resume</span></div>
+      <img src="images/analyzer.png" alt="Resume Analyzer showing a 34% match with Data Engineer, match by role for five roles, and an estimated salary of $159,000 with its range" width="2560" height="2000">
+    </div>
+  </div>
+</header>
+
+<section style="padding-top: 24px" aria-label="Key numbers">
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><b>869</b><span>job postings, 5 roles × 5 metros</span></div>
+      <div class="stat"><b>110</b><span>skills in one shared extraction dictionary</span></div>
+      <div class="stat"><b>19 · 86</b><span>dbt models · data tests</span></div>
+      <div class="stat"><b>9 tasks</b><span>nightly Airflow DAG, ≈3½ min</span></div>
+      <div class="stat"><b>$35.7K</b><span>salary model CV error, 20% better than baseline</span></div>
+      <div class="stat"><b>9 jobs</b><span>CI: 7 on every PR, +2 on main</span></div>
+      <div class="stat"><b>21 PRs</b><span>merged over the build</span></div>
+    </div>
+    <p class="note">Measured on real data (20 Oct 2026), not targets. Where the original goals were missed, the README says so.</p>
+  </div>
+</section>
+
+<section id="what">
+  <div class="wrap">
+    <span class="eyebrow">What it does</span>
+    <h2>Your resume, read against the market</h2>
+    <p class="lead">Every number comes from postings collected nightly by the pipeline. No LLM: the same skill patterns run on postings and on resumes, so the comparison is like for like.</p>
+    <div class="grid-4">
+      <article class="card">
+        <div class="icon i-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v5h5"/><path d="M19 8v3"/><circle cx="16.5" cy="16.5" r="3"/><path d="m21 21-2.4-2.4"/></svg></div>
+        <h3>Resume analysis</h3>
+        <p>A PDF is parsed in memory (pdfplumber) and matched against a 110-skill dictionary, the same regex patterns the Spark pipeline runs on postings. Out come the match % per role and a salary estimate. Nothing is stored or logged.</p>
+        <div class="kv"><span class="tag">pdfplumber</span><span class="tag">regex dictionary</span><span class="tag">~1 s per resume</span></div>
+      </article>
+      <article class="card">
+        <div class="icon i-teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9.2c-.6-.8-1.7-1.2-3-1.2-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.3 0-2.4-.4-3-1.2"/><path d="M12 6v2m0 8v2"/></svg></div>
+        <h3>Salary intelligence</h3>
+        <p>An XGBoost model trained on 333 salaried postings, validated with 5-fold cross-validation grouped by employer. Its error is $35.7K, 20% lower than a per-role median ($44.4K) and 9% lower than role × seniority. Tracked in MLflow.</p>
+        <div class="kv"><span class="tag">XGBoost</span><span class="tag">GroupKFold</span><span class="tag">MLflow</span></div>
+      </article>
+      <article class="card">
+        <div class="icon i-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg></div>
+        <h3>Job matching</h3>
+        <p>Semantic search with sentence-transformers (all-MiniLM-L6-v2, 384 dimensions). Long descriptions are chunked and averaged. Cosine similarity runs against the collected postings, and roles near your level come first.</p>
+        <div class="kv"><span class="tag">embeddings</span><span class="tag">cosine similarity</span><span class="tag">level-aware</span></div>
+      </article>
+      <article class="card">
+        <div class="icon i-rose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-6"/><path d="M16 8h4v4"/></svg></div>
+        <h3>Skill demand</h3>
+        <p>Each skill's share of a role's postings, ranked, with the most in-demand skills missing from your resume. A Prophet forecast is gated until a series has 12 weekly collections (3 so far), so it never forecasts from too little data.</p>
+        <div class="kv"><span class="tag">demand rank</span><span class="tag">Prophet</span><span class="tag">gated forecast</span></div>
+      </article>
+    </div>
+
+    <div class="shots">
+      <figure>
+        <img src="images/analyzer-gaps.png" alt="Top three skills to add, with demand share and salary association, above a table of the closest matching postings" loading="lazy" width="1584" height="1900">
+        <figcaption>Skills worth adding and the closest postings, ranked by meaning, near your level first</figcaption>
+      </figure>
+      <div class="stack">
+        <figure>
+          <img src="images/salaries.png" alt="Salary Explorer: posted salary ranges per role next to BLS national medians" loading="lazy" width="2560" height="1800">
+          <figcaption>Posted salary ranges by role, next to U.S. BLS medians</figcaption>
+        </figure>
+        <figure>
+          <img src="images/dark.png" alt="Job Insights in dark mode: topic cards, level mix and remote share by role" loading="lazy" width="2560" height="1800">
+          <figcaption>Job Insights: BERTopic topics, level mix, remote work (dark mode)</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section id="architecture">
+  <div class="wrap">
+    <span class="eyebrow">Architecture</span>
+    <h2>From raw postings to a served model</h2>
+    <p class="lead">Every stage rebuilds its output from the stage before, so any run can be repeated safely. Storage is zoned: raw, processed and curated.</p>
+    <div class="arch">
+      <div class="flow" role="list" aria-label="Data flow">
+        <div class="node" role="listitem"><span class="n i-indigo">API</span><span><b>JSearch API + BLS wages</b><small>Python + boto3 under a hard monthly request budget (free plan: ~200 calls)</small></span></div>
+        <div class="link" aria-hidden="true"><i class="line"></i><span>raw JSON, idempotent per day</span></div>
+        <div class="node" role="listitem"><span class="n i-teal">S3</span><span><b>S3 raw zone</b><small>one file per role × city × day; never overwritten</small></span></div>
+        <div class="link" aria-hidden="true"><i class="line"></i><span>PySpark + Delta Lake</span></div>
+        <div class="node" role="listitem"><span class="n i-teal">S3</span><span><b>S3 processed zone (Delta)</b><small>flattened, normalized, deduplicated; skills via a pandas UDF; a sightings log per collection</small></span></div>
+        <div class="link" aria-hidden="true"><i class="line"></i><span>load_postgres.py (JDBC)</span></div>
+        <div class="node" role="listitem"><span class="n i-amber">PG</span><span><b>RDS PostgreSQL · raw schema</b><small>overwritten on every run, so reruns are safe</small></span></div>
+        <div class="link" aria-hidden="true"><i class="line"></i><span>dbt: 19 models, 86 tests</span></div>
+        <div class="node" role="listitem"><span class="n i-amber">dbt</span><span><b>Star schema + marts</b><small>dim_role, dim_location, fact_job_postings; trend, salary-band, skill-demand marts</small></span></div>
+        <div class="link" aria-hidden="true"><i class="line"></i><span>NLP + ML</span></div>
+        <div class="node" role="listitem"><span class="n i-rose">ML</span><span><b>spaCy · embeddings · BERTopic · XGBoost · Prophet</b><small>years of experience, topics, salary model (MLflow), demand forecast → ml.* tables + S3 curated zone</small></span></div>
+        <div class="link" aria-hidden="true"><i class="line"></i><span>read-only DB user + model from S3</span></div>
+        <div class="node serve" role="listitem"><span class="n i-indigo">APP</span><span><b>FastAPI (8 endpoints) + Next.js static export</b><small>Docker Compose, nginx, Let's Encrypt HTTPS, on an EC2 t3.small</small></span></div>
+      </div>
+      <div class="rails">
+        <div class="card rail">
+          <h3><span class="icon i-indigo" style="width:32px;height:32px;margin:0;border-radius:9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:18px;height:18px"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>Orchestration</h3>
+          <p>An Airflow 3 DAG runs the pipeline every night: 9 tasks in about 3½ minutes.</p>
+          <ul>
+            <li>fetch → clean → skills → load → NLP</li>
+            <li>dbt source freshness, then dbt build</li>
+            <li>salary model and forecast in parallel</li>
+            <li>each task in its own process (PyTorch and XGBoost never share one)</li>
+          </ul>
+        </div>
+        <div class="card rail">
+          <h3><span class="icon i-teal" style="width:32px;height:32px;margin:0;border-radius:9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M12 3 4 7v5c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V7z"/><path d="m9 12 2 2 4-4"/></svg></span>Privacy by design</h3>
+          <ul>
+            <li>Resume sent as a raw body: no multipart temp files</li>
+            <li>nginx keeps uploads in memory, never on disk</li>
+            <li>Nothing logged; the response never echoes the text</li>
+            <li>Read-only database user for the app</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section id="shipping">
+  <div class="wrap">
+    <span class="eyebrow">How it ships</span>
+    <h2>Merge to main, live minutes later</h2>
+    <p class="lead">Seven checks on every pull request. On main, the images are published and the server deploys them itself, about a minute later. No SSH, and no AWS keys in CI.</p>
+    <div class="steps">
+      <div class="step"><b>Pull request</b><small>pytest, dbt on a throwaway Postgres, DAG imports, ML, API, web, Docker images + HTTPS modes</small></div>
+      <div class="step"><b>Publish</b><small>On main: API and web images pushed to GHCR, tagged with the commit</small></div>
+      <div class="step"><b>Server pulls</b><small>A systemd timer checks every 2 minutes and deploys a new commit</small></div>
+      <div class="step"><b>Deploy</b><small>Settings from SSM, images, <code>compose up --wait</code>, HTTPS health check</small></div>
+      <div class="step"><b>Smoke test</b><small>CI waits for the live commit, then tests TLS, pages, API and a sample resume</small></div>
+    </div>
+    <div class="facts">
+      <div class="fact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><p><b>Ports 80 and 443 only.</b> No SSH; one-off commands run through AWS Systems Manager.</p></div>
+      <div class="fact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg><p><b>Pull-based CD.</b> The AWS organization blocks GitHub OIDC, so the server watches the registry instead of CI holding keys.</p></div>
+      <div class="fact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7v5c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V7z"/></svg><p><b>HTTPS by default.</b> Let's Encrypt via certbot, renewed by a timer; nginx switches to TLS by itself.</p></div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section id="stack">
+  <div class="wrap">
+    <span class="eyebrow">Tech stack</span>
+    <h2>The full data + ML stack</h2>
+    <div class="stack-groups">
+      <div class="card"><h3>Data engineering</h3><div class="pills"><span>Python</span><span>PySpark</span><span>Delta Lake</span><span>dbt</span><span>PostgreSQL</span><span>Airflow 3</span><span>AWS S3</span><span>AWS RDS</span></div></div>
+      <div class="card"><h3>ML + NLP</h3><div class="pills"><span>XGBoost</span><span>MLflow</span><span>sentence-transformers</span><span>BERTopic</span><span>spaCy</span><span>Prophet</span><span>scikit-learn</span></div></div>
+      <div class="card"><h3>App</h3><div class="pills"><span>FastAPI</span><span>Next.js</span><span>React</span><span>TypeScript</span><span>Tailwind</span><span>pdfplumber</span></div></div>
+      <div class="card"><h3>Infra + delivery</h3><div class="pills"><span>Docker</span><span>nginx</span><span>Let's Encrypt</span><span>AWS EC2</span><span>SSM</span><span>GitHub Actions</span><span>GHCR</span></div></div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section id="journey">
+  <div class="wrap">
+    <span class="eyebrow">Build log</span>
+    <h2>Six phases, one at a time</h2>
+    <p class="lead">Rebuilt from a one-paragraph description, with every decision written down and every number measured.</p>
+    <div class="timeline">
+      <div class="phase"><span class="num">1</span><div><h3>Ingestion: JSearch API + BLS → S3</h3><p>A budget-aware fetcher (daily share, weekly role rotation, a hard stop on the API's remaining quota) landing raw JSON in S3, idempotent per day.</p></div></div>
+      <div class="phase"><span class="num">2</span><div><h3>PySpark processing: clean, dedup, skills, Delta Lake</h3><p>An explicit schema, annualized salaries, two-pass deduplication, and skill extraction through a pandas UDF.</p></div></div>
+      <div class="phase"><span class="num">3</span><div><h3>dbt star schema: 19 models, 86 tests</h3><p>Staging, intermediate and marts over RDS PostgreSQL. Salary associations are computed within each role, and CI builds everything against a throwaway Postgres.</p></div></div>
+      <div class="phase"><span class="num">4</span><div><h3>Airflow 3 orchestration: a 9-task nightly DAG</h3><p>Every step is a separate process calling the same CLI you run by hand; retries, timeouts and parallel model tasks.</p></div></div>
+      <div class="phase"><span class="num">5</span><div><h3>NLP + ML: spaCy, embeddings, BERTopic, XGBoost, Prophet</h3><p>Years of experience extracted for 74% of postings, topics from posting meaning, a salary model judged against three baselines, and a forecast that waits for enough data.</p></div></div>
+      <div class="phase"><span class="num">6</span><div><h3>Web app + deployment: FastAPI, Next.js, Docker, EC2, HTTPS, CI/CD</h3><p>A typed API and a static frontend, containerized behind nginx with Let's Encrypt, nine CI jobs, and a server that deploys each release itself.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section id="problems">
+  <div class="wrap">
+    <span class="eyebrow">Interesting problems solved</span>
+    <h2>Where the data pushed back</h2>
+    <div class="grid-3">
+      <article class="card problem">
+        <span class="k">Confounding by role</span>
+        <h3>The "Excel penalty" was mostly role mix</h3>
+        <div class="metric"><div><b style="color:var(--rose)">−$60K</b><small>all postings</small></div><span class="arrow">→</span><div><b style="color:var(--teal)">−$12K</b><small>within data analysts</small></div></div>
+        <p>Postings mentioning Excel paid far less overall, but mostly because analysts ask for Excel, and analysts earn less. Compared within one role, the gap shrinks to a fifth. It's a Simpson's-paradox-style trap.</p>
+        <p class="fix"><b>Fix:</b> every salary association is computed within one role, needs at least 10 salaries per side, and is worded "associated with", never "causes".</p>
+      </article>
+      <article class="card problem">
+        <span class="k">Silent data drift</span>
+        <h3>The same job, a new ID every fetch</h3>
+        <div class="metric"><div><b style="color:var(--rose)">0 / 728</b><small>repeated IDs across sightings</small></div></div>
+        <p>JSearch issues a new <code>job_id</code> each time it returns a posting, so IDs never repeat. Keeping the newest copy quietly moved re-seen postings into later weeks and rewrote demand history.</p>
+        <p class="fix"><b>Fix:</b> a <code>job_sightings</code> table, one row per posting per collection recorded before dedup, so past weeks never change.</p>
+      </article>
+      <article class="card problem">
+        <span class="k">Native crash</span>
+        <h3>PyTorch + XGBoost = segfault</h3>
+        <div class="metric"><div><b style="color:var(--rose)">exit 139</b><small>two OpenMP runtimes, one process</small></div></div>
+        <p>Both bring their own OpenMP runtime. In one process they crashed with exit 139, even with XGBoost on one thread; two OpenMP threads still crashed. It was isolated with separate-process experiments.</p>
+        <p class="fix"><b>Fix:</b> <code>OMP_NUM_THREADS=1</code>, pinned in code and baked into the Docker image's <code>ENV</code>, guarded by a regression test.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Built by <b style="color:var(--text)">Ash Upganlawar</b></div>
+    <div class="links">
+      <a href="https://github.com/Ashup1101/talentsignal">github.com/Ashup1101/talentsignal</a>
+      <a href="https://www.linkedin.com/in/ashlup">linkedin.com/in/ashlup</a>
+      <a href="https://ashup1101.github.io">ashup1101.github.io</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

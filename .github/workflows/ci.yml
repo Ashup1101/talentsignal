@@ -369,6 +369,9 @@ jobs:
   release:
     name: Live on EC2 + public smoke test
     needs: publish
+    # The repository variable APP_HOST is set while the app is live; unsetting it pauses
+    # this job (the server stopped to save costs) instead of failing every run on main.
+    if: vars.APP_HOST != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     concurrency:
